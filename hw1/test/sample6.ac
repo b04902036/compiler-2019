@@ -1,0 +1,17 @@
+i aa
+i bb
+i cc
+i dd
+i ee
+
+aa = 1
+bb = 2
+cc = aa + bb
+dd = cc * bb 
+ee = aa*bb + cc*dd + 1*2+3*4+10/2
+
+p aa
+p bb
+p cc
+p dd
+p ee

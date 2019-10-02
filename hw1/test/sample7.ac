@@ -1,0 +1,17 @@
+i a
+f bb
+i ccc
+f dddd
+i eeeee
+
+bb = 1.2 * 2.4 + 3.6 * 4.8
+ccc = 345
+a = 123
+eeeee = ccc - a
+p a
+p eeeee
+dddd = a + bb * ccc / eeeee
+p dddd
+p a
+p bb
+p ccc
