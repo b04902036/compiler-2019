@@ -9,6 +9,7 @@
 
 symtab * hash_table[TABLE_SIZE];
 extern int linenumber;
+extern int Total_Of_Different_ID;
 
 int HASH(char * str){
 	int idx=0;
@@ -65,25 +66,26 @@ void insertID(char *name){
 	symptr->counter=1;
 }
 
-void printSym(symtab* ptr) 
-{
-	    printf(" Name = %s \n", ptr->lexeme);
-	    printf(" References = %d \n", ptr->counter);
+int cmp(const void *a,const void*b){
+	symtab *aa = (symtab *)a;
+	symtab *bb = (symtab *)b;
+	return strcmp(aa->lexeme,bb->lexeme);
 }
-
 void printSymTab()
 {
-    int i;
-    printf("----- Symbol Table ---------\n");
-    for (i=0; i<TABLE_SIZE; i++)
-    {
-        symtab* symptr;
-	symptr = hash_table[i];
-	while (symptr != NULL)
-	{
-            printf("====>  index = %d \n", i);
-	    printSym(symptr);
-	    symptr=symptr->front;
+	int id = 0;
+	symtab *data = (symtab*)malloc(Total_Of_Different_ID*sizeof(symtab));
+	
+	printf("Frequency of identifiers:\n");
+	for (int i=0; i<TABLE_SIZE; i++){
+		symtab* symptr;
+		symptr = hash_table[i];
+		while (symptr != NULL){
+			data[id++] = *symptr;
+			symptr=symptr->front;
+		}
 	}
-    }
+	qsort(data,Total_Of_Different_ID,sizeof(data[0]),cmp);
+	for(int i = 0;i<Total_Of_Different_ID;i++)
+		printf("%s\t%d\n",data[i].lexeme,data[i].counter);
 }

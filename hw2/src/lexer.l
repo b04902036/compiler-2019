@@ -1,90 +1,136 @@
-%option noyywrap 
+%option noyywrap
 %{
 #include <stdio.h>
 #include "header.h" 
-int linenumber;
+int linenumber = 0;
+int Total_Of_Different_ID = 0;
 symtab * lookup();
-symtab * ptr;
 void     insertID();
 void 	 printSymTab();
-/* You need to define for all tokens in C--, here are some examples */
-#define INT		10
-#define FLOAT 		11 
-#define OP_ASSIGN 	12 
-#define OP_OR 		13 
-#define MK_LPAREN 	14 
-#define MK_RPAREN 	15 
-#define ERROR 		100 
-
 %}
 
-letter   [A-Za-z]
-digit    [0-9]
-ID	 {letter}({letter}|{digit}|"_")*
-WS	 [ \t]+
-Int_constant {digit}+
-
-/* You need to define the following RE's 
-Float_constant
-String_constant
-comment
-*/
-
-OP_assign        "="
-OP_or   "||"
-
-/* Other operators appear here */ 
 
 
-newline  "\n"
 
-DL_lparen "("
-DL_rparen ")"
-DL_lbrace "{"
-DL_rbrace "}"
-DL_comma  ","
+letter   		[A-Za-z]
+digit    		[0-9]
+ID	 			{letter}({letter}|{digit}|"_")*
+WS	 			[ \t]+
+
+Cint 			[-]?[0-9]+
+First			({Cint}"."[0-9]+?)|({Cint}?"."[0-9]+)
+Second			[Ee][+-]?[0-9]+
+Cfloat		  	{First}{Second}?	
+CString		 	["]((\\.)|[^"])*["]
+
+Return    	return
+Typedef   	typedef
+If        	if
+Else      	else
+Int       	int
+Float     	float
+For       	for
+Void      	void
+While     	while
+
+OP_add    	"+"
+OP_sub    	"-"
+OP_mul    	"*"
+OP_div    	"/"
+OP_less     "<"
+OP_great    ">"
+OP_lesseq   "<="
+OP_greateq  ">="
+OP_eq       "=="
+OP_noteq    "!="
+OP_or     "||"
+OP_and    "&&"
+OP_not    "!"
+OP_assign "="
+
+DL_lparen  "("
+DL_rparen  ")"
+DL_lbrack  "["
+DL_rbrack  "]"
+DL_lbrace  "{"
+DL_rbrace  "}"
+DL_comma   ","
 DL_semicol ";"
-DL_dot  "."
+DL_dot     "."
 
-/* Other separators appear here */
+newline   "\n"
+
+comment         \/\*((\*+[^/])|([^*]))*([*]?)\*\/
 
 error    .
 
+
 %%
 
-{WS}            {}
-{RWInt}         {/* return INT; */ }
-{RWFloat}       {/* return FLOAT; */}
-{ID}            { 
-			ptr = lookup(yytext);
-			if (ptr == NULL)
-			     insertID(yytext);	
-			else 
-			     ptr->counter++;
-		}
+{Return}    	
+{Typedef}   	
+{If}        	
+{Else}      	
+{Int}       	
+{Float}     	
+{For}       	
+{Void}			
+{While}     	
 
-{OP_assign}     /* return OP_ASSIGN; */ 
-{OP_or}         /* return OP_OR; */
-{DL_lparen}     /* return MK_LPAREN; */
-{DL_rparen}     /* return MK_RPAREN; */
-{DL_lbrace}     /* return MK_LBRACE; */
-{DL_rbrace}     /* return MK_RBRACE; */
+
+{newline}       linenumber += 1;
+{comment}		printf("%s\n", yytext);
+
+{Cint}   		//printf("cint %s\n",yytext);
+{Cfloat} 		//printf("cfloat %s\n",yytext);
+{CString} 		printf("cstring %s\n",yytext);
+
+{OP_add}    	{}
+{OP_sub}    	{}
+{OP_mul}    	{}
+{OP_div}    	{}
+{OP_less}     	{}
+{OP_great}    	{}
+{OP_lesseq}   	{}
+{OP_greateq}  	{}
+{OP_eq}       	{}
+{OP_noteq}    	{}
+{OP_or}         {}
+{OP_and}    	{}
+{OP_not}    	{}
+{OP_assign}     {}
+
+{DL_lparen}     {}
+{DL_rparen}     {}
+{DL_lbrack}     {} 
+{DL_rbrack}     {}
+{DL_lbrace}     {}
+{DL_rbrace}     {}
 {DL_comma}      {}
 {DL_semicol}    {}
-{newline}       linenumber += 1;
-{error}         printf("ERR \n");/* return ERROR; */
+{DL_dot}		{}
+
+{WS}            {}
+{ID}            { 
+					symtab *ptr = lookup(yytext);
+					if (ptr == NULL)	{Total_Of_Different_ID++;insertID(yytext);}
+					else 				ptr->counter++;
+				}
+				
+{error}         printf("Error:%s\n", yytext);return -1;
+
 
 
 %%
 
-main(int argc, char **argv)
+
+
+
+int main(int argc, char **argv)	// main function 
 {
- argc--; ++argv;
-   if (argc > 0)
-      yyin = fopen(argv[0], "r");
-   else
-      yyin = stdin;
-   yylex();
-   printSymTab();
+	if (argc > 1)	yyin = fopen(argv[1], "r");
+	else			yyin = stdin;
+	yylex();					// *** lex scannar generator ***
+	printSymTab();
 }
 

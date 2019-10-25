@@ -7,6 +7,8 @@ int func(int a, int b)
 
 int main()
 {
+	a = "123123"
+	b = "456456\" 123"
 	/* 1: this is just a sample */
     int c, d;
 	float f,g;
