@@ -1,5 +1,5 @@
 TARGET = parser
-OBJECT = parser.tab.c parser.tab.o lex.yy.c alloc.o functions.o
+OBJECT = parser.output parser.tab.h parser.tab.c parser.tab.o lex.yy.c alloc.o functions.o
 CC = gcc -g
 LEX = flex
 YACC = bison -v
@@ -9,7 +9,7 @@ LIBS = -lfl
 parser: parser.tab.o alloc.o functions.o
 	$(CC) -o $(TARGET) parser.tab.o alloc.o functions.o $(LIBS)
 
-parser.tab.o: parser.tab.c lex.yy.c alloc.o functions.c
+parser.tab.o: parser.tab.c lex.yy.c alloc.o functions.o
 	$(CC) -c parser.tab.c
     
 lex.yy.c: lexer3.l

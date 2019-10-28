@@ -2,6 +2,7 @@
 #define __HEADER_H__
 
 #define MAX_ARRAY_DIMENSION 7
+#include <stdio.h>
 
 typedef enum DATA_TYPE
 {
@@ -139,12 +140,12 @@ typedef struct TypeSpecSemanticValue
 
 //don't modify or lexer may break
 typedef struct CON_Type{
-        C_type  const_type;
+    C_type  const_type;
 	union {
 		int     intval;
 		double  fval;
-		char    *sc; }
-		const_u;
+		char    *sc; 
+	}const_u;
 } CON_Type;
 
 
@@ -154,7 +155,7 @@ struct AST_NODE {
 	struct AST_NODE *rightSibling;
 	struct AST_NODE *leftmostSibling;
 	AST_TYPE nodeType;
-        DATA_TYPE dataType;
+    DATA_TYPE dataType;
 	int linenumber;
 	union {
         IdentifierSemanticValue identifierSemanticValue;
@@ -168,5 +169,9 @@ typedef struct AST_NODE AST_NODE;
 
 AST_NODE *Allocate(AST_TYPE type);
 void semanticAnalysis(AST_NODE *root);
+
+void printGV(AST_NODE *root, char* fileName);
+int printGVNode(FILE *fp, AST_NODE* node, int count);
+char *printLabelString(FILE *fp, AST_NODE *astNode);
 
 #endif
