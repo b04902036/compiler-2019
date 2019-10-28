@@ -10,7 +10,10 @@
 int linenumber = 1;
 AST_NODE *prog;
 
+extern int yylex();
+extern int yyerror (char *mesg);
 extern int g_anyErrorOccur;
+extern void printGV(AST_NODE *root, char* fileName);
 
 static inline AST_NODE* makeSibling(AST_NODE *a, AST_NODE *b)
 { 
@@ -272,8 +275,6 @@ block           : decl_list stmt_list
                         AST_NODE* varDecl = makeChild(Allocate(VARIABLE_DECL_LIST_NODE), $1);
                         AST_NODE* stmtList = makeChild(Allocate(STMT_LIST_NODE), $2);
                         makeFamily($$, 2, varDecl, stmtList);
-                        makeChild(varDecl, $1);
-                        makeChild(stmtList, $2);
                     }
                 | stmt_list  
                     {
@@ -483,7 +484,7 @@ stmt		: MK_LBRACE block MK_RBRACE
                     /* done */
                     $$ = $2;
                 }
-            | WHILE MK_LPAREN relop_expr_list MK_RPAREN stmt
+            | WHILE MK_LPAREN relop_expr MK_RPAREN stmt
                 {
                     /* done */
                     $$ = makeStmtNode(WHILE_STMT);
@@ -495,7 +496,7 @@ stmt		: MK_LBRACE block MK_RBRACE
                     $$ = makeStmtNode(FOR_STMT);
                     makeFamily($$, 4, $3, $5, $7, $9);
                 }
-            | var_ref OP_ASSIGN relop_expr MK_SEMICOLON
+            | var_ref OP_ASSIGN relop_expr_list MK_SEMICOLON
                 {
                     /* done */
                     $$ = makeStmtNode(ASSIGN_STMT);
@@ -513,7 +514,7 @@ stmt		: MK_LBRACE block MK_RBRACE
                     $$ = makeStmtNode(IF_STMT);
                     makeFamily($$, 3, $3, $5, $7);
                 }
-            | ID MK_LPAREN relop_expr MK_RPAREN MK_SEMICOLON
+            | ID MK_LPAREN relop_expr_list MK_RPAREN MK_SEMICOLON
                 {
                     /* done */
                     $$ = makeStmtNode(FUNCTION_CALL_STMT);
