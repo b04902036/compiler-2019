@@ -1,27 +1,27 @@
 int func(int a, int b)
 {
-	int main;
+    int main;
     a = 3;
-	main = a * b;
+    main = a * b;
 }
 
 int main()
 {
-	a = "123123"
-	b = "456456\" 123"
-	/* 1: this is just a sample */
+    a = "123123"
+    b = "456456\" 123"
+    /* 1: this is just a sample */
     int c, d;
-	float f,g;
-	g = 3.3;
+    float f,g;
+    g = 3.3;
     c = 1;
     d = 3;
-	/* 2: this is a 3-line
-	comment
-	*/
-	f = read();
+    /* 2: this is a 3-line
+    comment
+    */
+    f = read();
     func(c,e);
-	write(d);
-	d = 0;  /* 3: this is /* the end ***/
-	
+    write(d);
+    d = 0;  /* 3: this is /* the end ***/
+    
     return 0;
 }

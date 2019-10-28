@@ -4,13 +4,13 @@
 /******************************************************************************************************************************************
     All enumeration literals
        TokenType : Specify the type of the token scanner returns
-	   DataType  : The data type of the declared variable
-	   StmtType  : Indicate one statement in AcDc program is print or assignment statement.
-	   ValueType : The node types of the expression tree that represents the expression on the right hand side of the assignment statement.
-	               Identifier, IntConst, FloatConst must be the leaf nodes ex: a, b, c , 1.5 , 3.
-				   PlusNode, MinusNode, MulNode, DivNode are the operations in AcDc. They must be the internal nodes.
-                   Note that IntToFloatConvertNode to represent the type coercion may appear after finishing type checking. 			  
-	   Operation : Specify all arithematic expression, including +, - , *, / and type coercion.
+       DataType  : The data type of the declared variable
+       StmtType  : Indicate one statement in AcDc program is print or assignment statement.
+       ValueType : The node types of the expression tree that represents the expression on the right hand side of the assignment statement.
+                   Identifier, IntConst, FloatConst must be the leaf nodes ex: a, b, c , 1.5 , 3.
+                   PlusNode, MinusNode, MulNode, DivNode are the operations in AcDc. They must be the internal nodes.
+                   Note that IntToFloatConvertNode to represent the type coercion may appear after finishing type checking.               
+       Operation : Specify all arithematic expression, including +, - , *, / and type coercion.
 *******************************************************************************************************************************************/
 
 typedef enum TokenType { FloatDeclaration, IntegerDeclaration, PrintOp, AssignmentOp, PlusOp, MinusOp,
@@ -43,9 +43,9 @@ typedef struct Declaration{
 
 /* 
     For decls production or say all declarations. (
-	You can view it as the subtree for decls in AST,
-	or just view it as the linked list that stores 
-	all declarations. ) 
+    You can view it as the subtree for decls in AST,
+    or just view it as the linked list that stores 
+    all declarations. ) 
 */
 typedef struct Declarations{
     Declaration first;
@@ -108,8 +108,8 @@ typedef struct Program{
 
 /* For building the symbol table */
 typedef struct SymbolTable{
-	int id;
-	char map[23][65];
+    int id;
+    char map[23][65];
     DataType table[26];
 } SymbolTable;
 
