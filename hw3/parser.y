@@ -11,9 +11,9 @@ int linenumber = 1;
 AST_NODE *prog;
 
 extern int yylex();
-extern int yyerror (char *mesg);
 extern int g_anyErrorOccur;
 extern void printGV(AST_NODE *root, char* fileName);
+int yyerror (char *mesg);
 
 static inline AST_NODE* makeSibling(AST_NODE *a, AST_NODE *b)
 { 
@@ -496,7 +496,7 @@ stmt		: MK_LBRACE block MK_RBRACE
                     $$ = makeStmtNode(FOR_STMT);
                     makeFamily($$, 4, $3, $5, $7, $9);
                 }
-            | var_ref OP_ASSIGN relop_expr_list MK_SEMICOLON
+            | var_ref OP_ASSIGN relop_expr MK_SEMICOLON
                 {
                     /* done */
                     $$ = makeStmtNode(ASSIGN_STMT);
