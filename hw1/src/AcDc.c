@@ -10,10 +10,6 @@ int main( int argc, char *argv[] )
     FILE *source, *target;
     Program program;
     SymbolTable symtab;
-    longToChar = (VariableToReg *) malloc(sizeof(VariableToReg));
-    longToChar->usedReg = 0;
-    
-    memset(hashTable, 0, sizeof(hashTable));
 
     if( argc == 3){
         source = fopen(argv[1], "r");
@@ -27,15 +23,19 @@ int main( int argc, char *argv[] )
             exit(2);
         }
         else{
-            program = parser(source);
+            /*
+            while(1){
+                Token token = scanner(source);
+                if(token.type==EOFsymbol)   exit(0);
+                printf("%s\n",token.tok);
+            }
+            */
+            program = parser(source);   // 1
             fclose(source);
-            symtab = build(program);
-            // constant folding
-            fold(&program);
-            // add type conversion
-            check(&program, &symtab);
-            // generate dc code
-            gencode(program, target);
+            symtab = build(program);    // 2
+            check(&program, &symtab);   // 3
+            gencode(program, target, &symtab);  // 4
+            
         }
     }
     else{
@@ -55,12 +55,12 @@ Token getNumericToken( FILE *source, char c )
     Token token;
     int i = 0;
 
-    while( isdigit(c) ) {
+    while( isdigit(c) ) {       //讀到下一個非數字為止
         token.tok[i++] = c;
         c = fgetc(source);
     }
 
-    if( c != '.' ){
+    if( c != '.' ){             //case 1：非數字不為 '.'，所以是 int
         ungetc(c, source);
         token.tok[i] = '\0';
         token.type = IntValue;
@@ -70,13 +70,13 @@ Token getNumericToken( FILE *source, char c )
     token.tok[i++] = '.';
 
     c = fgetc(source);
-    if( !isdigit(c) ){
+    if( !isdigit(c) ){          //case 2：非數字為 '.'，所以是 float
         ungetc(c, source);
         printf("Expect a digit : %c\n", c);
         exit(1);
     }
 
-    while( isdigit(c) ){
+    while( isdigit(c) ){        //讀到下一個非數字為止
         token.tok[i++] = c;
         c = fgetc(source);
     }
@@ -87,58 +87,49 @@ Token getNumericToken( FILE *source, char c )
     return token;
 }
 
-Token getAlphabeticToken( FILE *source, Token token, VariableToReg *longToChar )
-{
-    int cnt = 0;
-
-    // turn string into char
-    token.tok[0] = hash(token.tok);
-    token.tok[1] = '\0';
-
-    return token; 
-}
-
 Token scanner( FILE *source )
 {
     char c;
     Token token;
 
-    while( !feof(source) ){
-        c = fgetc(source);
+    while( !feof(source) ){ //還有字元
+        c = fgetc(source);  //讀一字元
 
-        while( isspace(c) ) c = fgetc(source);
+        while( isspace(c) ) c = fgetc(source);  //保證獨到非空白字元
 
-        if( isdigit(c) )
+        if( isdigit(c) )                        //處理數字的 token
             return getNumericToken(source, c);
 
-        int idx = 1;
-        token.tok[0] = c;
-
-        c = fgetc(source);
-        while (islower(c)) {
-            token.tok[idx++] = c;
-            c = fgetc(source);
-        }
-        ungetc(c, source);
-        token.tok[idx] = '\0';
-        
-        if (islower(token.tok[0])){
-            if (!strcmp(token.tok, "f"))
-                token.type = FloatDeclaration;
-            else if (!strcmp(token.tok, "i"))
-                token.type = IntegerDeclaration;
-            else if (!strcmp(token.tok, "p"))
-                token.type = PrintOp;
-            else
-                token.type = Alphabet;
+        token.tok[0] = c;                       //處理文字的 token
+        token.tok[1] = '\0';
+        if( islower(c) ){                       //case 1：英文字母開頭
+            char d = fgetc(source);
+            int ok = (!isalpha(d))?1:0;
+            ungetc(d, source);
             
-            if(token.type == Alphabet)
-                return getAlphabeticToken(source, token, longToChar);
-            else
-                return token;
+            if( c == 'f' && ok ){
+                token.type = FloatDeclaration;
+            }else if( c == 'i' && ok ){
+                token.type = IntegerDeclaration;
+            }else if( c == 'p' && ok ){
+                token.type = PrintOp;
+            }else{
+                token.type = Alphabet;
+                c = fgetc(source);
+                
+                int id = 1;
+                while( isalpha(c) ){
+                    token.tok[id++] = c;
+                    c = fgetc(source);
+                }
+                token.tok[id] = '\0';
+                ungetc(c, source);
+            }
+            //printf("%s\n",token.tok);
+            return token;
         }
 
-        switch(token.tok[0]){
+        switch(c){                              //case 2：operator、EOF、exception
             case '=':
                 token.type = AssignmentOp;
                 return token;
@@ -179,17 +170,15 @@ Declaration parseDeclaration( FILE *source, Token token )
     switch(token.type){
         case FloatDeclaration:
         case IntegerDeclaration:
-            // care about alphabetic only
-            token2 = scanner(source);
-            if (strlen(token2.tok) == 1 &&
-                    (token2.tok[0] == 'f' ||
-                     token2.tok[0] == 'i' ||
-                     token2.tok[0] == 'p')) {
+            token2 = scanner(source);                       // f token2 或是 i token2
+            if (strcmp(token2.tok, "f") == 0 ||             // 要保證 token2 不能是 'f i p'
+                    strcmp(token2.tok, "i") == 0 ||
+                    strcmp(token2.tok, "p") == 0) {
                 printf("Syntax Error: %s cannot be used as id\n", token2.tok);
                 exit(1);
             }
             return makeDeclarationNode( token, token2 );
-        default:
+        default:                                            // 基本不會發生
             printf("Syntax Error: Expect Declaration %s\n", token.tok);
             exit(1);
     }
@@ -197,57 +186,115 @@ Declaration parseDeclaration( FILE *source, Token token )
 
 Declarations *parseDeclarations( FILE *source )
 {
-    // only care about f. i
     Token token = scanner(source);
     Declaration decl;
     Declarations *decls;
     switch(token.type){
-        case FloatDeclaration:
+        case FloatDeclaration:                          //Case 1 : float 或是 int 宣告
         case IntegerDeclaration:
             decl = parseDeclaration(source, token);
             decls = parseDeclarations(source);
             return makeDeclarationTree( decl, decls );
+        case PrintOp:                                   //Case 2 : 讀到 Stms，return 然後呼叫 parseStatements
         case Alphabet:
-            lookupAndUngetString(token.tok[0], source, longToChar);
+            for(int i = strlen(token.tok)-1;i>=0;i--)
+                ungetc(token.tok[i], source);
             return NULL;
-        case PrintOp:
-            ungetc(token.tok[0], source);
+        case EOFsymbol:                                 //讀到 EOF 等價於 Case 2
             return NULL;
-        case EOFsymbol:
-            return NULL;
-        default:
+        default:                                        //Case 3 : 讀到其他東西，表示 Syntax Error
             printf("Syntax Error: Expect declarations %s\n", token.tok);
             exit(1);
     }
 }
 
+/*
+Origin: 
+    RHS = value ET
+    ET = + value ET | - value ET | λ
+    
+-----------------------------------
+New:
+    RHS = term ET
+    ET = + term ET | - term ET | λ
+    
+    Term = value TT
+    TT = * value TT | / value TT | λ
+    
+    I use the same structure for Term and Expression, but their order of parsing are different.
+*/
+
 Expression *parseValue( FILE *source )
 {
-    char id;
     Token token = scanner(source);
     Expression *value = (Expression *)malloc( sizeof(Expression) );
     value->leftOperand = value->rightOperand = NULL;
 
     switch(token.type){
-        case Alphabet:
+        case Alphabet:                              //id
             (value->v).type = Identifier;
-            (value->v).val.id = token.tok[0];
+            strcpy((value->v).val.id,token.tok);
             break;
-        case IntValue:
+        case IntValue:                              //int value
             (value->v).type = IntConst;
             (value->v).val.ivalue = atoi(token.tok);
             break;
-        case FloatValue:
+        case FloatValue:                            //float value
             (value->v).type = FloatConst;
             (value->v).val.fvalue = atof(token.tok);
             break;
-        default:
+        default:                                    //Syntax error
             printf("Syntax Error: Expect Identifier or a Number %s\n", token.tok);
             exit(1);
     }
 
     return value;
 }
+
+
+
+Expression *parseTermTail( FILE *source, Expression *lvalue )
+{
+    Token token = scanner(source);
+    Expression *expr;
+
+    switch(token.type){
+        case MulOp:
+            expr = (Expression *)malloc( sizeof(Expression) );
+            (expr->v).type = MulNode;
+            (expr->v).val.op = Mul;
+            expr->leftOperand = lvalue;
+            expr->rightOperand = parseValue(source);
+            return parseTermTail(source, expr);
+        case DivOp:
+            expr = (Expression *)malloc( sizeof(Expression) );
+            (expr->v).type = DivNode;
+            (expr->v).val.op = Div;
+            expr->leftOperand = lvalue;
+            expr->rightOperand = parseValue(source);
+            return parseTermTail(source, expr);
+        case Alphabet:                      // 下一個 staments
+        case PrintOp:
+        case PlusOp:
+        case MinusOp:
+            for(int i = strlen(token.tok)-1;i>=0;i--)
+                ungetc(token.tok[i], source);
+            return lvalue;
+        case EOFsymbol:                     // 讀完整個檔案
+            return lvalue;
+        default:                            //Syntax error
+            printf("Syntax Error: Expect a numeric value or an identifier %s\n", token.tok);
+            exit(1);
+    }
+}
+
+Expression *parseTerm( FILE *source)
+{
+    Expression *value = parseValue(source);
+    return parseTermTail(source, value);
+}
+
+
 
 Expression *parseExpressionTail( FILE *source, Expression *lvalue )
 {
@@ -260,122 +307,28 @@ Expression *parseExpressionTail( FILE *source, Expression *lvalue )
             (expr->v).type = PlusNode;
             (expr->v).val.op = Plus;
             expr->leftOperand = lvalue;
-            expr->rightOperand = parseValue(source);
+            expr->rightOperand = parseTerm(source);
             return parseExpressionTail(source, expr);
         case MinusOp:
             expr = (Expression *)malloc( sizeof(Expression) );
             (expr->v).type = MinusNode;
             (expr->v).val.op = Minus;
             expr->leftOperand = lvalue;
-            expr->rightOperand = parseValue(source);
+            expr->rightOperand = parseTerm(source);
             return parseExpressionTail(source, expr);
-        case MulOp:
-            switch ((lvalue->v).type) {
-                case PlusNode:
-                case MinusNode:
-                    expr = (Expression *) malloc(sizeof(Expression));
-                    (expr->v).type = MulNode;
-                    (expr->v).val.op = Mul;
-                    expr->leftOperand = lvalue->rightOperand;
-                    expr->rightOperand = parseValue(source);
-                    lvalue->rightOperand = expr;
-                    return parseExpressionTail(source, lvalue);
-                case MulNode:
-                case DivNode:
-                    expr = (Expression *) malloc(sizeof(Expression));
-                    (expr->v).type = MulNode;
-                    (expr->v).val.op = Mul;
-                    expr->leftOperand = lvalue;
-                    expr->rightOperand = parseValue(source);
-                    return parseExpressionTail(source, expr);
-                default:
-                    printf("an operatiion neither + - * / inside a equation. should not happen\n");
-                    exit(255);
-            }
-        case DivOp:
-            switch ((lvalue->v).type) {
-                case PlusNode:
-                case MinusNode:
-                    expr = (Expression *) malloc(sizeof(Expression));
-                    (expr->v).type = DivNode;
-                    (expr->v).val.op = Div;
-                    expr->leftOperand = lvalue->rightOperand;
-                    expr->rightOperand = parseValue(source);
-                    lvalue->rightOperand = expr;
-                    return parseExpressionTail(source, lvalue);
-                case MulNode:
-                case DivNode:
-                    expr = (Expression *) malloc(sizeof(Expression));
-                    (expr->v).type = DivNode;
-                    (expr->v).val.op = Div;
-                    expr->leftOperand = lvalue;
-                    expr->rightOperand = parseValue(source);
-                    return parseExpressionTail(source, expr);
-                default:
-                    printf("an operatiion neither + - * / inside a equation. should not happen\n");
-                    exit(255);
-            }
-        case Alphabet:
-            lookupAndUngetString(token.tok[0], source, longToChar);
-            return lvalue;
+        case Alphabet:                      // 下一個 staments
         case PrintOp:
-            ungetc(token.tok[0], source);
+            for(int i = strlen(token.tok)-1;i>=0;i--)
+                ungetc(token.tok[i], source);
             return lvalue;
-        case EOFsymbol:
+        case EOFsymbol:                     // 讀完整個檔案
             return lvalue;
-        default:
+        default:                            //Syntax error
             printf("Syntax Error: Expect a numeric value or an identifier %s\n", token.tok);
             exit(1);
     }
 }
 
-Expression *parseExpression( FILE *source, Expression *lvalue )
-{
-    Token token = scanner(source);
-    Expression *expr;
-
-    switch(token.type){
-        case PlusOp:
-            expr = (Expression *)malloc( sizeof(Expression) );
-            (expr->v).type = PlusNode;
-            (expr->v).val.op = Plus;
-            expr->leftOperand = lvalue;
-            expr->rightOperand = parseValue(source);
-            return parseExpressionTail(source, expr);
-        case MinusOp:
-            expr = (Expression *)malloc( sizeof(Expression) );
-            (expr->v).type = MinusNode;
-            (expr->v).val.op = Minus;
-            expr->leftOperand = lvalue;
-            expr->rightOperand = parseValue(source);
-            return parseExpressionTail(source, expr);
-        case MulOp:
-            expr = (Expression *) malloc(sizeof(Expression));
-            (expr->v).type = MulNode;
-            (expr->v).val.op = Mul;
-            expr->leftOperand = lvalue;
-            expr->rightOperand = parseValue(source);
-            return parseExpressionTail(source, expr);
-        case DivOp:
-            expr = (Expression *) malloc(sizeof(Expression));
-            (expr->v).type = DivNode;
-            (expr->v).val.op = Div;
-            expr->leftOperand = lvalue;
-            expr->rightOperand = parseValue(source);
-            return parseExpressionTail(source, expr);
-        case Alphabet:
-            lookupAndUngetString(token.tok[0], source, longToChar);
-            return NULL;
-        case PrintOp:
-            ungetc(token.tok[0], source);
-            return NULL;
-        case EOFsymbol:
-            return NULL;
-        default:
-            printf("Syntax Error: Expect a numeric value or an identifier %s\n", token.tok);
-            exit(1);
-    }
-}
 
 Statement parseStatement( FILE *source, Token token )
 {
@@ -383,27 +336,27 @@ Statement parseStatement( FILE *source, Token token )
     Expression *value, *expr;
 
     switch(token.type){
-        case Alphabet:
+        case Alphabet:                                      // Case 1 : id = xxx
             next_token = scanner(source);
-            if(next_token.type == AssignmentOp){
-                value = parseValue(source);
-                expr = parseExpression(source, value);
-                return makeAssignmentNode(token.tok[0], value, expr);
+            if(next_token.type == AssignmentOp){                
+                value = parseTerm(source);
+                expr = parseExpressionTail(source, value);  //注意到 parseExpression 和 parseExpression 幾乎做一樣的事
+                return makeAssignmentNode(token.tok, expr);     // value is not used inside of entering function
             }
-            else{
+            else{                                               
                 printf("Syntax Error: Expect an assignment op %s\n", next_token.tok);
                 exit(1);
             }
-        case PrintOp:
+        case PrintOp:                                       // Case 2 : p id
             next_token = scanner(source);
-            if(next_token.type == Alphabet)
-                return makePrintNode(next_token.tok[0]);
-            else{
+            if(next_token.type == Alphabet){            
+                return makePrintNode(next_token.tok);
+            }else{                                              
                 printf("Syntax Error: Expect an identifier %s\n", next_token.tok);
                 exit(1);
             }
             break;
-        default:
+        default:                                            // 基本不會發生
             printf("Syntax Error: Expect a statement %s\n", token.tok);
             exit(1);
     }
@@ -411,20 +364,19 @@ Statement parseStatement( FILE *source, Token token )
 
 Statements *parseStatements( FILE * source )
 {
-    // only cares about assignment or print
     Token token = scanner(source);
     Statement stmt;
     Statements *stmts;
 
     switch(token.type){
-        case Alphabet:
-        case PrintOp:
+        case Alphabet:                              //Case 1: id = xxx
+        case PrintOp:                               //Case 2: p id
             stmt = parseStatement(source, token);
             stmts = parseStatements(source);
             return makeStatementTree(stmt , stmts);
-        case EOFsymbol:
+        case EOFsymbol:                             //Case 3: 讀完整個程式了
             return NULL;
-        default:
+        default:                                    //Case 4: Syntax Error
             printf("Syntax Error: Expect statements %s\n", token.tok);
             exit(1);
     }
@@ -436,9 +388,9 @@ Statements *parseStatements( FILE * source )
  **********************************************************************/
 Declaration makeDeclarationNode( Token declare_type, Token identifier )
 {
-    char id;
+    //printf("%s\n%s\n",declare_type.tok, identifier.tok);
     Declaration tree_node;
-    
+
     switch(declare_type.type){
         case FloatDeclaration:
             tree_node.type = Float;
@@ -449,8 +401,7 @@ Declaration makeDeclarationNode( Token declare_type, Token identifier )
         default:
             break;
     }
-
-    tree_node.name = identifier.tok[0];
+    strcpy(tree_node.name,identifier.tok);
 
     return tree_node;
 }
@@ -464,28 +415,86 @@ Declarations *makeDeclarationTree( Declaration decl, Declarations *decls )
     return new_tree;
 }
 
+void ConstantFolding( Expression *expr )
+{
+    Expression *left = expr->leftOperand;
+    Expression *right = expr->rightOperand;
+    
+    if(left == NULL || right == NULL)   return;
+    
+    ConstantFolding(left);
+    ConstantFolding(right);
+    
+    if(left->v.type != IntConst && left->v.type != FloatConst)      return;
+    if(right->v.type != IntConst && right->v.type != FloatConst)    return;
+    
+    int leftint,rightint;
+    leftint = (left->v.type == IntConst) ? 1 : 0;
+    rightint = (right->v.type == IntConst) ? 1 : 0;
+    
+    
+    switch(expr->v.type){
+        case PlusNode:
+            if(leftint&&rightint)       expr->v.type = IntConst,    expr->v.val.ivalue = left->v.val.ivalue + right->v.val.ivalue;
+            else if(leftint)            expr->v.type = FloatConst,  expr->v.val.fvalue = (float)left->v.val.ivalue + (float)right->v.val.fvalue;
+            else if(rightint)           expr->v.type = FloatConst,  expr->v.val.fvalue = (float)left->v.val.fvalue + (float)right->v.val.ivalue;
+            else                        expr->v.type = FloatConst,  expr->v.val.fvalue = (float)left->v.val.fvalue + (float)right->v.val.fvalue;
+            break;
+        case MinusNode:
+            if(leftint&&rightint)       expr->v.type = IntConst,    expr->v.val.ivalue = left->v.val.ivalue - right->v.val.ivalue;
+            else if(leftint)            expr->v.type = FloatConst,  expr->v.val.fvalue = (float)left->v.val.ivalue - (float)right->v.val.fvalue;
+            else if(rightint)           expr->v.type = FloatConst,  expr->v.val.fvalue = (float)left->v.val.fvalue - (float)right->v.val.ivalue;
+            else                        expr->v.type = FloatConst,  expr->v.val.fvalue = (float)left->v.val.fvalue - (float)right->v.val.fvalue;
+            break;
+        case MulNode:
+            if(leftint&&rightint)       expr->v.type = IntConst,    expr->v.val.ivalue = left->v.val.ivalue * right->v.val.ivalue;
+            else if(leftint)            expr->v.type = FloatConst,  expr->v.val.fvalue = (float)left->v.val.ivalue * (float)right->v.val.fvalue;
+            else if(rightint)           expr->v.type = FloatConst,  expr->v.val.fvalue = (float)left->v.val.fvalue * (float)right->v.val.ivalue;
+            else                        expr->v.type = FloatConst,  expr->v.val.fvalue = (float)left->v.val.fvalue * (float)right->v.val.fvalue;
+            break;
+        case DivNode:
+            if(leftint&&rightint)       expr->v.type = IntConst,    expr->v.val.ivalue = left->v.val.ivalue / right->v.val.ivalue;
+            else if(leftint)            expr->v.type = FloatConst,  expr->v.val.fvalue = (float)left->v.val.ivalue / (float)right->v.val.fvalue;
+            else if(rightint)           expr->v.type = FloatConst,  expr->v.val.fvalue = (float)left->v.val.fvalue / (float)right->v.val.ivalue;
+            else                        expr->v.type = FloatConst,  expr->v.val.fvalue = (float)left->v.val.fvalue / (float)right->v.val.fvalue;
+            break;
+            
+        default:
+            break;
+    }
+    //printf("%d %d %d %d %d\n",lefti, righti, lefti * righti, lefti / righti, expr->v.val.ivalue);
+    free(expr->leftOperand);
+    free(expr->rightOperand);
+    expr->leftOperand = NULL;
+    expr->rightOperand = NULL;
+    return;
+}
 
-Statement makeAssignmentNode( char id, Expression *v, Expression *expr_tail )
+Statement makeAssignmentNode( char *id, Expression *expr_tail ) // in this version, v is not used
 {
     Statement stmt;
-    AssignmentStatement assign;
-
     stmt.type = Assignment;
-    assign.id = id;
-    if(expr_tail == NULL)
-        assign.expr = v;
-    else
-        assign.expr = expr_tail;
+    
+    
+    AssignmentStatement assign;
+    strcpy(assign.id, id);
+    //print_expr(expr_tail);
+    //printf("\n");
+    ConstantFolding(expr_tail);
+    //print_expr(expr_tail);
+    //printf("\n");
+    assign.expr = expr_tail;
+    
     stmt.stmt.assign = assign;
 
     return stmt;
 }
 
-Statement makePrintNode( char id )
+Statement makePrintNode( char *id )
 {
     Statement stmt;
     stmt.type = Print;
-    stmt.stmt.variable = id;
+    strcpy(stmt.stmt.variable, id);
 
     return stmt;
 }
@@ -520,14 +529,29 @@ void InitializeTable( SymbolTable *table )
 
     for(i = 0 ; i < 26; i++)
         table->table[i] = Notype;
+    for(i = 0 ; i < 23; i++)
+        for(int j = 0; j < 65; j++)
+            table->map[i][j] = '\0';
+    table->id = 0;
 }
 
-void add_table( SymbolTable *table, char c, DataType t )
-{
-    int index = (int)(c - 'a');
+int mapping(SymbolTable *table, char *str){
+    for(int i = 0; i < (table->id) ;i++)
+        if(strcmp(str,table->map[i])==0)
+            return i;
+        
+    strcpy(table->map[(table->id)],str);
+    table->id = table->id + 1;
+    return table->id - 1;
+}
 
+void add_table( SymbolTable *table, char *c, DataType t )
+{
+    // int index = (int)(c - 'a');
+    int index = mapping(table, c);
+    
     if(table->table[index] != Notype)
-        printf("Error : id %c has been declared\n", c);//error
+        printf("Error : id %s has been declared\n", c);//error
     table->table[index] = t;
 }
 
@@ -562,7 +586,7 @@ void convertType( Expression * old, DataType type )
     if(old->type == Int && type == Float){
         Expression *tmp = (Expression *)malloc( sizeof(Expression) );
         if(old->v.type == Identifier)
-            printf("convert to float %c \n",old->v.val.id);
+            printf("convert to float %s \n",old->v.val.id);
         else
             printf("convert to float %d \n", old->v.val.ivalue);
         tmp->v = old->v;
@@ -590,22 +614,24 @@ DataType generalize( Expression *left, Expression *right )
     return Int;
 }
 
-DataType lookup_table( SymbolTable *table, char c )
+DataType lookup_table( SymbolTable *table, char *c )
 {
-    int id = c-'a';
+    //int id = c[0]-'a';
+    int id = mapping(table, c);
+    
     if( table->table[id] != Int && table->table[id] != Float)
-        printf("Error : identifier %c is not declared\n", c);//error
+        printf("Error : identifier %s is not declared\n", c);//error
     return table->table[id];
 }
 
 void checkexpression( Expression * expr, SymbolTable * table )
 {
-    char c;
+    char c[65];
     if(expr->leftOperand == NULL && expr->rightOperand == NULL){
-        switch((expr->v).type){
+        switch(expr->v.type){
             case Identifier:
-                c = (expr->v).val.id;
-                printf("identifier : %c\n",c);
+                stpcpy(c, expr->v.val.id);
+                printf("identifier : %s\n",c);
                 expr->type = lookup_table(table, c);
                 break;
             case IntConst:
@@ -621,7 +647,7 @@ void checkexpression( Expression * expr, SymbolTable * table )
                 break;
         }
     }
-    else{
+    else{       //PlusNode, MinusNode, MulNode, DivNode
         Expression *left = expr->leftOperand;
         Expression *right = expr->rightOperand;
 
@@ -639,7 +665,7 @@ void checkstmt( Statement *stmt, SymbolTable * table )
 {
     if(stmt->type == Assignment){
         AssignmentStatement assign = stmt->stmt.assign;
-        printf("assignment : %c \n",assign.id);
+        printf("assignment : %s \n",assign.id);
         checkexpression(assign.expr, table);
         stmt->stmt.assign.type = lookup_table(table, assign.id);
         if (assign.expr->type == Float && stmt->stmt.assign.type == Int) {
@@ -649,7 +675,7 @@ void checkstmt( Statement *stmt, SymbolTable * table )
         }
     }
     else if (stmt->type == Print){
-        printf("print : %c \n",stmt->stmt.variable);
+        printf("print : %s \n",stmt->stmt.variable);
         lookup_table(table, stmt->stmt.variable);
     }
     else printf("error : statement error\n");//error
@@ -668,7 +694,7 @@ void check( Program *program, SymbolTable * table )
 /***********************************************************************
   Code generation
  ************************************************************************/
-void fprint_op( FILE *target, ValueType op )
+void fprint_op( FILE *target, ValueType op)
 {
     switch(op){
         case MinusNode:
@@ -678,10 +704,10 @@ void fprint_op( FILE *target, ValueType op )
             fprintf(target,"+\n");
             break;
         case MulNode:
-            fprintf(target,"*\n");
+            fprintf(target, "*\n");
             break;
         case DivNode:
-            fprintf(target,"/\n");
+            fprintf(target, "/\n");
             break;
         default:
             fprintf(target,"Error in fprintf_op ValueType = %d\n",op);
@@ -689,13 +715,13 @@ void fprint_op( FILE *target, ValueType op )
     }
 }
 
-void fprint_expr( FILE *target, Expression *expr)
+void fprint_expr( FILE *target, Expression *expr, SymbolTable *table)
 {
 
     if(expr->leftOperand == NULL){
         switch( (expr->v).type ){
             case Identifier:
-                fprintf(target,"l%c\n",(expr->v).val.id);
+                fprintf(target,"l%c\n",mapping(table, (expr->v).val.id)+'a');
                 break;
             case IntConst:
                 fprintf(target,"%d\n",(expr->v).val.ivalue);
@@ -709,19 +735,19 @@ void fprint_expr( FILE *target, Expression *expr)
         }
     }
     else{
-        fprint_expr(target, expr->leftOperand);
+        fprint_expr(target, expr->leftOperand, table);
         if(expr->rightOperand == NULL){
             fprintf(target,"5k\n");
         }
         else{
-            //	fprint_right_expr(expr->rightOperand);
-            fprint_expr(target, expr->rightOperand);
+            //  fprint_right_expr(expr->rightOperand);
+            fprint_expr(target, expr->rightOperand, table);
             fprint_op(target, (expr->v).type);
         }
     }
 }
 
-void gencode(Program prog, FILE * target)
+void gencode(Program prog, FILE * target, SymbolTable *table)
 {
     Statements *stmts = prog.statements;
     Statement stmt;
@@ -730,11 +756,11 @@ void gencode(Program prog, FILE * target)
         stmt = stmts->first;
         switch(stmt.type){
             case Print:
-                fprintf(target,"l%c\n",stmt.stmt.variable);
+                fprintf(target,"l%c\n",mapping(table,stmt.stmt.variable)+'a');
                 fprintf(target,"p\n");
                 break;
             case Assignment:
-                fprint_expr(target, stmt.stmt.assign.expr);
+                fprint_expr(target, stmt.stmt.assign.expr, table);
                 /*
                    if(stmt.stmt.assign.type == Int){
                    fprintf(target,"0 k\n");
@@ -742,7 +768,7 @@ void gencode(Program prog, FILE * target)
                    else if(stmt.stmt.assign.type == Float){
                    fprintf(target,"5 k\n");
                    }*/
-                fprintf(target,"s%c\n",stmt.stmt.assign.id);
+                fprintf(target,"s%c\n",mapping(table,stmt.stmt.assign.id)+'a');
                 fprintf(target,"0 k\n");
                 break;
         }
@@ -750,6 +776,10 @@ void gencode(Program prog, FILE * target)
     }
 
 }
+
+
+
+
 
 
 /***************************************
@@ -764,7 +794,7 @@ void print_expr(Expression *expr)
         print_expr(expr->leftOperand);
         switch((expr->v).type){
             case Identifier:
-                printf("%c ", (expr->v).val.id);
+                printf("%s ", (expr->v).val.id);
                 break;
             case IntConst:
                 printf("%d ", (expr->v).val.ivalue);
@@ -811,7 +841,7 @@ void test_parser( FILE *source )
             printf("i ");
         if(decl.type == Float)
             printf("f ");
-        printf("%c ",decl.name);
+        printf("%s ",decl.name);
         decls = decls->rest;
     }
 
@@ -820,210 +850,14 @@ void test_parser( FILE *source )
     while(stmts != NULL){
         stmt = stmts->first;
         if(stmt.type == Print){
-            printf("p %c ", stmt.stmt.variable);
+            printf("p %s ", stmt.stmt.variable);
         }
 
         if(stmt.type == Assignment){
-            printf("%c = ", stmt.stmt.assign.id);
+            printf("%s = ", stmt.stmt.assign.id);
             print_expr(stmt.stmt.assign.expr);
         }
         stmts = stmts->rest;
     }
 
 }
-
-// return value:
-// -2 : requested expr is not a leaf
-// -1 : requested expr is a leaf, and (expr->v).type is a variable
-// other : requested expr is a leaf, return (expr->v).type
-int constantFolding(Expression *expr) {
-    if (expr->leftOperand == NULL && expr->rightOperand == NULL) {
-        // this should be int, float or variable
-        switch ((expr->v).type) {
-            case Identifier:
-                return -2;
-            case IntConst:
-            case FloatConst:
-                return (expr->v).type;
-            default:
-                printf("this op should not appear here.\n");
-                exit(255);
-        }
-    }
-    else if (expr->leftOperand == NULL || expr->rightOperand == NULL) {
-        printf("ConvertOp or AssignOp appear"\
-                " while doing constant folding,"\
-                " should not happen\n");
-        exit(255);
-    }
-    else {
-        int is_left_leaf = constantFolding(expr->leftOperand);
-        int is_right_leaf = constantFolding(expr->rightOperand);
-        if (is_left_leaf > -1 && is_right_leaf > -1) {
-            switch ((expr->v).val.op) {
-                case Plus:
-                    if (is_left_leaf == IntConst && is_right_leaf == IntConst) {
-                        (expr->v).type = IntConst;
-                        (expr->v).val.ivalue = expr->leftOperand->v.val.ivalue +
-                                             expr->rightOperand->v.val.ivalue;
-                    }
-                    else if (is_left_leaf == IntConst && is_right_leaf == FloatConst) {
-                        (expr->v).type = FloatConst;
-                        (expr->v).val.fvalue = expr->leftOperand->v.val.ivalue +
-                                             expr->rightOperand->v.val.fvalue;
-                    }
-                    else if (is_left_leaf == FloatConst && is_right_leaf == IntConst) {
-                        (expr->v).type = FloatConst;
-                        (expr->v).val.fvalue = expr->leftOperand->v.val.fvalue +
-                                             expr->rightOperand->v.val.ivalue;
-                    }
-                    else if (is_left_leaf == FloatConst && is_right_leaf == FloatConst) {
-                        (expr->v).type = FloatConst;
-                        (expr->v).val.fvalue = expr->leftOperand->v.val.fvalue +
-                                             expr->rightOperand->v.val.fvalue;
-                    }
-                    else {
-                        printf("neither IntConst nor FloatConst, should not happen\n");
-                        exit(255);
-                    }
-                    break;
-                case Minus:
-                    if (is_left_leaf == IntConst && is_right_leaf == IntConst) {
-                        (expr->v).type = IntConst;
-                        (expr->v).val.ivalue = expr->leftOperand->v.val.ivalue -
-                                             expr->rightOperand->v.val.ivalue;
-                    }
-                    else if (is_left_leaf == IntConst && is_right_leaf == FloatConst) {
-                        (expr->v).type = FloatConst;
-                        (expr->v).val.fvalue = expr->leftOperand->v.val.ivalue -
-                                             expr->rightOperand->v.val.fvalue;
-                    }
-                    else if (is_left_leaf == FloatConst && is_right_leaf == IntConst) {
-                        (expr->v).type = FloatConst;
-                        (expr->v).val.fvalue = expr->leftOperand->v.val.fvalue -
-                                             expr->rightOperand->v.val.ivalue;
-                    }
-                    else if (is_left_leaf == FloatConst && is_right_leaf == FloatConst) {
-                        (expr->v).type = FloatConst;
-                        (expr->v).val.fvalue = expr->leftOperand->v.val.fvalue -
-                                             expr->rightOperand->v.val.fvalue;
-                    }
-                    else {
-                        printf("neither IntConst nor FloatConst, should not happen\n");
-                        exit(255);
-                    }
-                    break;
-                case Mul:
-                    if (is_left_leaf == IntConst && is_right_leaf == IntConst) {
-                        (expr->v).type = IntConst;
-                        (expr->v).val.ivalue = expr->leftOperand->v.val.ivalue *
-                                             expr->rightOperand->v.val.ivalue;
-                    }
-                    else if (is_left_leaf == IntConst && is_right_leaf == FloatConst) {
-                        (expr->v).type = FloatConst;
-                        (expr->v).val.fvalue = expr->leftOperand->v.val.ivalue *
-                                             expr->rightOperand->v.val.fvalue;
-                    }
-                    else if (is_left_leaf == FloatConst && is_right_leaf == IntConst) {
-                        (expr->v).type = FloatConst;
-                        (expr->v).val.fvalue = expr->leftOperand->v.val.fvalue *
-                                             expr->rightOperand->v.val.ivalue;
-                    }
-                    else if (is_left_leaf == FloatConst && is_right_leaf == FloatConst) {
-                        (expr->v).type = FloatConst;
-                        (expr->v).val.fvalue = expr->leftOperand->v.val.fvalue *
-                                             expr->rightOperand->v.val.fvalue;
-                    }
-                    else {
-                        printf("neither IntConst nor FloatConst, should not happen\n");
-                        exit(255);
-                    }
-                    break;
-                case Div:
-                    if (is_left_leaf == IntConst && is_right_leaf == IntConst) {
-                        (expr->v).type = IntConst;
-                        (expr->v).val.ivalue = expr->leftOperand->v.val.ivalue /
-                                             expr->rightOperand->v.val.ivalue;
-                    }
-                    else if (is_left_leaf == IntConst && is_right_leaf == FloatConst) {
-                        (expr->v).type = FloatConst;
-                        (expr->v).val.fvalue = expr->leftOperand->v.val.ivalue /
-                                             expr->rightOperand->v.val.fvalue;
-                    }
-                    else if (is_left_leaf == FloatConst && is_right_leaf == IntConst) {
-                        (expr->v).type = FloatConst;
-                        (expr->v).val.fvalue = expr->leftOperand->v.val.fvalue /
-                                             expr->rightOperand->v.val.ivalue;
-                    }
-                    else if (is_left_leaf == FloatConst && is_right_leaf == FloatConst) {
-                        (expr->v).type = FloatConst;
-                        (expr->v).val.fvalue = expr->leftOperand->v.val.fvalue /
-                                             expr->rightOperand->v.val.fvalue;
-                    }
-                    else {
-                        printf("neither IntConst nor FloatConst, should not happen\n");
-                        exit(255);
-                    }
-                    break;
-                default:
-                    printf("neither + - * /, should not happen\n");
-                    exit(255);
-            }
-            expr->leftOperand = NULL;
-            expr->rightOperand = NULL;
-            return (expr->v).type;
-        }
-        else 
-            return -1;
-    }
-
-}
-
-void fold(Program *program) {
-    Statements *stmts = program->statements;
-    while(stmts != NULL){
-        if (stmts->first.type == Assignment)
-            constantFolding(stmts->first.stmt.assign.expr);
-        stmts = stmts->rest;
-    }
-}
-
-void lookupAndUngetString(char c, FILE *f, VariableToReg *longToChar) {
-    // lookup c in longToChar
-    int whichName = c - 'a';
-    int idx = strlen(longToChar->name[whichName]) - 1;
-    while (idx > -1) {
-        ungetc(longToChar->name[whichName][idx--], f);
-    }
-    return;
-}
-
-char hash(char input[]) {
-    // get hash value
-    int length = strlen(input);
-    int output = 0;
-    int nowReg;
-    for (int i = 0; i < length; ++i)
-        output = (output ^ (((int)input[i]) << 2)) % HASHTABLESIZE;
-    
-    // fill in hash table
-    while (hashTable[output].name != NULL) {
-        // check if this hash value is set already
-        if (!strcmp(input, hashTable[output].name)) {
-            // this hash value is already set
-            return hashTable[output].id;
-        }
-        output = (output + 1) % HASHTABLESIZE;
-    }
-
-    // hash value not set yet
-    hashTable[output].name = (char *) malloc(sizeof(char) * MAXNAME);
-    nowReg = longToChar->usedReg++;
-    strncpy(hashTable[output].name, input, MAXNAME);
-    hashTable[output].id = 'a' + nowReg;
-
-    // set longToChar table for inverse indexing
-    strncpy(longToChar->name[nowReg], input, sizeof(longToChar->name[nowReg]));
-    return 'a' + nowReg;
-}
-
