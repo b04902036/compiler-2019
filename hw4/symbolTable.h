@@ -104,7 +104,7 @@ void addIntoHashChain(SymbolTableEntry** hashTable, int hashIndex, SymbolTableEn
 void initializeSymbolTable();
 void symbolTableEnd();
 SymbolTableEntry* retrieveSymbol(char* symbolName);
-void addSymbol(symbolTableEntry* symbol);
+void addSymbol(SymbolTableEntry* symbol);
 void removeSymbol(char* symbolName);
 int declaredLocally(char* symbolName);
 void openScope();

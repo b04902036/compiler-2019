@@ -43,12 +43,12 @@ void removeFromHashTrain(int hashIndex, SymbolTableEntry* entry)
 void addIntoHashChain(SymbolTableEntry** hashTable, 
         int hashIndex, SymbolTableEntry* symbol) {
     if (hashTable[hashIndex] == NULL) {
-        hashTable[hashIndex] = entry;
+        hashTable[hashIndex] = symbol;
     }
     else {
-        hashTable[hashIndex]->prevInHashChain = entry;
-        entry->nextInHashChain = hashTable[hashIndex];
-        hashTable[hashIndex] = entry;
+        hashTable[hashIndex]->prevInHashChain = symbol;
+        symbol->nextInHashChain = hashTable[hashIndex];
+        hashTable[hashIndex] = symbol;
     }
 }
 
@@ -76,14 +76,23 @@ void symbolTableEnd()
  */
 SymbolTableEntry* retrieveSymbol(char* symbolName) {
     int idx = HASH(symbolName);
-    int hashTableId = symbolTable.totalHashTableCount - 1;
-    return symbolTable.hashTable[hashTableId][idx];
+    int maxHashTableId = symbolTable.totalHashTableCount - 1;
+    SymbolTableEntry* ret;
+    for (int hashTableId = maxHashTableId; hashTableId > -1; --hashTableId) {
+        ret = symbolTable.hashTable[hashTableId][idx];
+        if (ret != NULL) {
+            return ret;
+        }
+    }
+    
+    // if reach here, no declaration is found
+    return NULL;
 }
 
 /**
  * add symbol into symbolTable
  */
-void addSymbol(symbolTableEntry* symbol) {
+void addSymbol(SymbolTableEntry* symbol) {
     int idx = HASH(symbol->name);
     int hashTableId = symbolTable.totalHashTableCount - 1;
     addIntoHashChain(symbolTable.hashTable[hashTableId], idx, symbol);
@@ -115,12 +124,12 @@ void openScope() {
 
     // 1.
     if (current >= already) {
-        symbolTable.hashTable = (symbolTableEntry***) realloc(symbolTable.hashTable, sizeof(symbolTableEntry**) * (current + 1));
+        symbolTable.hashTable = (SymbolTableEntry***) realloc(symbolTable.hashTable, sizeof(SymbolTableEntry**) * (current + 1));
         symbolTable.allocatedHashTableCount = current + 1;
     }
 
     // 2.
-    symbolTable.hashTable[current] = (symbolTableEntry**) calloc(HASH_TABLE_SIZE, sizeof(symbolTableEntry*));
+    symbolTable.hashTable[current] = (SymbolTableEntry**) calloc(HASH_TABLE_SIZE, sizeof(SymbolTableEntry*));
 
     // 3.
     ++symbolTable.totalHashTableCount;
@@ -141,7 +150,7 @@ void closeScope() {
     // 1.
     if (current >= already) {
         // allocate three at once
-        symbolTable.totalScope = (symbolTableEntry***) realloc(symbolTable.totalScope, sizeof(symbolTableEntry**) * (already + 3));
+        symbolTable.totalScope = (SymbolTableEntry***) realloc(symbolTable.totalScope, sizeof(SymbolTableEntry**) * (already + 3));
         symbolTable.allocatedTotalScopeCount += 3;
     }
     

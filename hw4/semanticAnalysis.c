@@ -1,18 +1,22 @@
+#include "header.h"
+#include "symbolTable.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "header.h"
-#include "symbolTable.h"
+#include <stdbool.h>
 // This file is for reference only, you are not required to follow the implementation. //
 // You only need to check for errors stated in the hw4 document. //
+extern SymbolTable symbolTable;
 int g_anyErrorOccur = 0;
 
 
 DATA_TYPE getBiggerType(DATA_TYPE dataType1, DATA_TYPE dataType2);
 void processNode(AST_NODE *programNode);
 void processDeclarationNode(AST_NODE* declarationNode);
-void declareIdList(AST_NODE* typeNode, SymbolAttributeKind isVariableOrTypeAttribute, int ignoreArrayFirstDimSize);
+void declareIdList(AST_NODE* typeNode, bool ignoreFirstDimensionOfArray);
 void declareFunction(AST_NODE* returnTypeNode);
+void declareType(AST_NODE* typeNode);
 void processDeclDimList(AST_NODE* variableDeclDimList, TypeDescriptor* typeDescriptor, int ignoreFirstDimSize);
 void processTypeNode(AST_NODE* typeNode);
 void processBlockNode(AST_NODE* blockNode);
@@ -85,6 +89,9 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) {
     g_anyErrorOccur = 1;
     printf("Error found in line %d\n", node->linenumber);
     switch (errorMsgKind) {
+        case SYMBOL_IS_NOT_TYPE:
+            printf("variable type should not be a variable\n");
+            break;
         case SYMBOL_UNDECLARED:
             printf("symbol undeclared\n"); 
             break;
@@ -107,11 +114,11 @@ void semanticAnalysis(AST_NODE *root)
 }
 
 
-DATA_TYPE getBiggerType(DATA_TYPE dataType1, DATA_TYPE dataType2)
-{
+DATA_TYPE getBiggerType(DATA_TYPE dataType1, DATA_TYPE dataType2) {
     if(dataType1 == FLOAT_TYPE || dataType2 == FLOAT_TYPE) {
         return FLOAT_TYPE;
-    } else {
+    }
+    else {
         return INT_TYPE;
     }
 }
@@ -229,96 +236,15 @@ void processNode(AST_NODE *programNode) {
 }
 
 void processDeclarationNode(AST_NODE* declarationNode) {
-    int idx = 0;
-    DATA_TYPE type;
-    AST_NODE* dataType = declarationNode->child;
     switch (declarationNode->semantic_value.declSemanticValue.kind) {
         case VARIABLE_DECL:
-            // get type
-            type = checkType(dataType->semantic_value.identifierSemanticValue.identifierName);
-            if (type == -1) {
-                printErrorMsg(declarationNode, SYMBOL_UNDECLARED);
-            }
-
-            for (AST_NODE* variable = dataType->rightSibling; variable != NULL; variable = variable->rightSibling) {
-                SymbolTableEntry* symbol = newSymbolTableEntry();
-                
-                // set name, should not overflow as long as ID name is set correctly in parser
-                symbol->name = strdup(variable->semantic_value.identifierSemanticValue.identifierName);
-                if (symbol->name == NULL) {
-                    fprintf(stderr, "[SEMANTIC CHECK ERROR] fail to allocate memory for variable name\n");
-                    exit(255);
-                }
-
-                // allocate memory for symbol->attribute
-                symbol->attribute = (SymbolAttribute*) malloc(sizeof(SymbolAttribute));
-                if (symbol->attribute == NULL) {
-                    fprintf(stderr, "[SEMANTIC CHECK ERROR] fail to allocate memory for symbol attribute\n");
-                    exit(255);
-                }
-                
-                // allocate for typeDescriptor
-                symbol->attribute->attr.typeDescriptor = (TypeDescriptor*) malloc(sizeof(TypeDescriptor));
-                if (symbol->attribute->attr.typeDescriptor == NULL) {
-                    fprintf(stderr, "[SEMANTIC CHECK ERROR] fail to allocate memory for symbol attribute\n");
-                    exit(255);
-                }
-
-                // check if it is array or scalar
-                switch (variable->semantic_value.identifierSemanticValue.kind) {
-                    case NORMAL_ID:
-                        symbol->attribute->attr.typeDescriptor->kind = SCALAR_TYPE_DESCRIPTOR;
-                        symbol->attribute->attr.typeDescriptor->properties.dataType = type;
-                        break;
-                    case ARRAY_ID:
-                        symbol->attribute->attr.typeDescriptor->kind = ARRAY_TYPE_DESCRIPTOR;
-                        
-                        /**
-                         * set array dimension information
-                         *  we don't care about array size in each dimension in this hw
-                         *  only need to check
-                         *   1. NULL (e.g. int a[][10];) is not allowed when declaring
-                         *   2. float (e.g. int a[10-0.3];) is not allowed when declaring
-                         */
-                        for (AST_NODE* arrayDimension = variable->child;
-                                arrayDimension != NULL; arrayDimension = arrayDimension->rightSibling, ++idx) {
-                            if (arrayDimension->nodeType == NUL_NODE) {
-                                printErrorMsg(arrayDimension, ARRAY_SIZE_MISSING);
-                            }
-                            else if ((arrayDimension->nodeType == EXPR_NODE) &&
-                                        (getExprType(arrayDimension) == FLOAT_TYPE)) {
-                                printErrorMsg(arrayDimension, ARRAY_SIZE_NOT_INT);
-                            }
-                            else if ((arrayDimension->nodeType == CONST_VALUE_NODE) &&
-                                        arrayDimension->semantic_value.const1->const_type == FLOATC) {
-                                printErrorMsg(arrayDimension, ARRAY_SIZE_NOT_INT);
-                            }
-                        }
-                        symbol->attribute->attr.typeDescriptor->properties.arrayProperties.dimension = idx;
-                        symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType = type;
-                        break;
-                    case WITH_INIT_ID:
-                        symbol->attribute->attr.typeDescriptor->kind = SCALAR_TYPE_DESCRIPTOR;
-                        symbol->attribute->attr.typeDescriptor->properties.dataType = type;
-                        break;
-                    default:
-                        fprintf(stderr, "[PARSER ERROR] no such kind of IdentifierSemanticValue\n");
-                } // switch, variable type
-
-            /**
-             * now symbolTableEntry is ready
-             * we need to add it into symbolTable
-             */
-            addSymbol(symbol);
-
-            } // for, over variable
-
-            break;
+            declareIdList(declarationNode, false);
         case TYPE_DECL:
             break;
         case FUNCTION_DECL:
             break;
         case FUNCTION_PARAMETER_DECL:
+            declareIdList(declarationNode, true);
             break;
         default:
             fprintf(stderr, "no such DECL kind\n");
@@ -328,14 +254,107 @@ void processDeclarationNode(AST_NODE* declarationNode) {
 }
 
 
-void processTypeNode(AST_NODE* idNodeAsType)
-{
+void processTypeNode(AST_NODE* idNodeAsType) {
 }
 
 /**
- *
+ * process Declare Identifier List
+ * this is either under
+ *  1. VARIABLE_DECL
+ *  2. FUNCTION_PARAMETER_DECL
+ * the only difference is in FUNCTION_PARAMETER_DECL, we can ignore first dimension of array definition
  */
-void declareIdList(AST_NODE* declarationNode, SymbolAttributeKind isVariableOrTypeAttribute, int ignoreArrayFirstDimSize) {
+void declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray) {
+    int idx = 0;
+    DATA_TYPE type;
+    AST_NODE* dataType = declarationNode->child;
+    
+    /**
+     * get declared type
+     * this type name should not be a variable name
+     */
+    if (retrieveSymbol(dataType->semantic_value.identifierSemanticValue.identifierName) != NULL) {
+        printErrorMsg(dataType, SYMBOL_IS_NOT_TYPE);
+        return;
+    }
+    type = checkType(dataType->semantic_value.identifierSemanticValue.identifierName);
+    if (type == -1) {
+        printErrorMsg(declarationNode, SYMBOL_UNDECLARED);
+    }
+
+    for (AST_NODE* variable = dataType->rightSibling; variable != NULL; variable = variable->rightSibling) {
+        SymbolTableEntry* symbol = newSymbolTableEntry();
+        
+        // set name, should not overflow as long as ID name is set correctly in parser
+        symbol->name = strdup(variable->semantic_value.identifierSemanticValue.identifierName);
+        if (symbol->name == NULL) {
+            fprintf(stderr, "[SEMANTIC CHECK ERROR] fail to allocate memory for variable name\n");
+            exit(255);
+        }
+
+        // allocate memory for symbol->attribute
+        symbol->attribute = (SymbolAttribute*) malloc(sizeof(SymbolAttribute));
+        if (symbol->attribute == NULL) {
+            fprintf(stderr, "[SEMANTIC CHECK ERROR] fail to allocate memory for symbol attribute\n");
+            exit(255);
+        }
+        
+        // allocate for typeDescriptor
+        symbol->attribute->attr.typeDescriptor = (TypeDescriptor*) malloc(sizeof(TypeDescriptor));
+        if (symbol->attribute->attr.typeDescriptor == NULL) {
+            fprintf(stderr, "[SEMANTIC CHECK ERROR] fail to allocate memory for symbol attribute\n");
+            exit(255);
+        }
+
+        // check if it is array or scalar
+        switch (variable->semantic_value.identifierSemanticValue.kind) {
+            case NORMAL_ID:
+                symbol->attribute->attr.typeDescriptor->kind = SCALAR_TYPE_DESCRIPTOR;
+                symbol->attribute->attr.typeDescriptor->properties.dataType = type;
+                break;
+            case ARRAY_ID:
+                symbol->attribute->attr.typeDescriptor->kind = ARRAY_TYPE_DESCRIPTOR;
+                
+                /**
+                 * set array dimension information
+                 *  we don't care about array size in each dimension in this hw
+                 *  only need to check
+                 *   1. NULL (e.g. int a[][10];) is not allowed when declaring
+                 *   2. float (e.g. int a[10-0.3];) is not allowed when declaring
+                 */
+                for (AST_NODE* arrayDimension = variable->child;
+                        arrayDimension != NULL; arrayDimension = arrayDimension->rightSibling, ++idx) {
+                    if (arrayDimension->nodeType == NUL_NODE && 
+                            !(idx == 0 && ignoreFirstDimensionOfArray)) {
+                        printErrorMsg(arrayDimension, ARRAY_SIZE_MISSING);
+                    }
+                    else if ((arrayDimension->nodeType == EXPR_NODE) &&
+                                (getExprType(arrayDimension) == FLOAT_TYPE)) {
+                        printErrorMsg(arrayDimension, ARRAY_SIZE_NOT_INT);
+                    }
+                    else if ((arrayDimension->nodeType == CONST_VALUE_NODE) &&
+                                arrayDimension->semantic_value.const1->const_type == FLOATC) {
+                        printErrorMsg(arrayDimension, ARRAY_SIZE_NOT_INT);
+                    }
+                }
+                symbol->attribute->attr.typeDescriptor->properties.arrayProperties.dimension = idx;
+                symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType = type;
+                break;
+            case WITH_INIT_ID:
+                symbol->attribute->attr.typeDescriptor->kind = SCALAR_TYPE_DESCRIPTOR;
+                symbol->attribute->attr.typeDescriptor->properties.dataType = type;
+                break;
+            default:
+                fprintf(stderr, "[PARSER ERROR] no such kind of IdentifierSemanticValue\n");
+        } // switch, variable type
+
+    /**
+     * now symbolTableEntry is ready
+     * we need to add it into symbolTable
+     */
+    addSymbol(symbol);
+
+    } // for, over variable
 }
 
 void checkAssignOrExpr(AST_NODE* assignOrExprRelatedNode)
