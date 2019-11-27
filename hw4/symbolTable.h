@@ -2,6 +2,8 @@
 #define __SYMBOL_TABLE_H__
 
 #include "header.h"
+
+#include <stdbool.h>
 // This file is for reference only, you are not required to follow the implementation. //
 
 
@@ -98,12 +100,12 @@ typedef struct SymbolTable
 } SymbolTable;
 
 
-int HASH(char * str);
+int HASH(const char* str);
 SymbolTableEntry* newSymbolTableEntry();
 void addIntoHashChain(SymbolTableEntry** hashTable, int hashIndex, SymbolTableEntry* symbol);
 void initializeSymbolTable();
 void symbolTableEnd();
-SymbolTableEntry* retrieveSymbol(char* symbolName);
+SymbolTableEntry* retrieveSymbol(const char* symbolName, bool onlyInCurrentScope);
 void addSymbol(SymbolTableEntry* symbol);
 void removeSymbol(char* symbolName);
 int declaredLocally(char* symbolName);

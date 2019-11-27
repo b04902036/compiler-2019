@@ -4,7 +4,7 @@
 #include <stdio.h>
 // This file is for reference only, you are not required to follow the implementation. //
 
-int HASH(char* str) {
+int HASH(const char* str) {
 	int idx=0;
 	while (*str){
 		idx <<= 1;
@@ -72,16 +72,24 @@ void symbolTableEnd()
 
 /**
  * given a symbol name, get the entry in hash table
+ * NEED TO CHECK IF THE NAME IS THE SAME in case for COLLISION
  * return NULL if not found
  */
-SymbolTableEntry* retrieveSymbol(char* symbolName) {
+SymbolTableEntry* retrieveSymbol(const char* symbolName, bool onlyInCurrentScope) {
     int idx = HASH(symbolName);
     int maxHashTableId = symbolTable.totalHashTableCount - 1;
     SymbolTableEntry* ret;
     for (int hashTableId = maxHashTableId; hashTableId > -1; --hashTableId) {
         ret = symbolTable.hashTable[hashTableId][idx];
-        if (ret != NULL) {
-            return ret;
+        while (ret != NULL) {
+            if (!strcmp(ret->name, symbolName)) {
+                return ret;
+            }
+            ret = ret->nextInHashChain;
+        }
+
+        if (onlyInCurrentScope) {
+            return NULL;
         }
     }
     

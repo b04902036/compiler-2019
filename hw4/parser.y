@@ -774,16 +774,6 @@ char *argv[];
      printGV(prog, NULL);
      
      initializeSymbolTable();
-
-     typeInt = (typeDef*) malloc(sizeof(typeDef));
-     typeFloat = (typeDef*) malloc(sizeof(typeDef));
-     typeVoid = (typeDef*) malloc(sizeof(typeDef));
-     strcpy(typeInt->name, "int");
-     typeInt->next = NULL;
-     strcpy(typeFloat->name, "float");
-     typeFloat->next = NULL;
-     strcpy(typeVoid->name, "void");
-     typeVoid->next = NULL;
      
      semanticAnalysis(prog);
      

@@ -74,14 +74,14 @@ void printErrorMsgSpecial(AST_NODE* node1, char* name2, ErrorMsgKind errorMsgKin
 {
     g_anyErrorOccur = 1;
     printf("Error found in line %d\n", node1->linenumber);
-    /*
-    switch(errorMsgKind)
-    {
-    default:
-        printf("Unhandled case in void printErrorMsg(AST_NODE* node, ERROR_MSG_KIND* errorMsgKind)\n");
-        break;
+    switch(errorMsgKind) {
+        case SYMBOL_REDECLARE:
+            printf("symbol %s redeclared\n", name2);
+            break;
+        default:
+            printf("Unhandled case in void printErrorMsgSpecial(AST_NODE* node, ERROR_MSG_KIND* %d)\n", errorMsgKind);
+            break;
     }
-    */
 }
 
 
@@ -90,7 +90,7 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) {
     printf("Error found in line %d\n", node->linenumber);
     switch (errorMsgKind) {
         case SYMBOL_IS_NOT_TYPE:
-            printf("variable type should not be a variable\n");
+            printf("unknown type name\n");
             break;
         case SYMBOL_UNDECLARED:
             printf("symbol undeclared\n"); 
@@ -102,7 +102,7 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) {
             printf("array size should be int\n");
             break;
         default:
-            printf("Unhandled case in void printErrorMsg(AST_NODE* node, ERROR_MSG_KIND* errorMsgKind)\n");
+            printf("Unhandled case in void printErrorMsg(AST_NODE* node, ERROR_MSG_KIND* %d)\n", errorMsgKind);
             break;
     }
 }
@@ -163,29 +163,28 @@ int getExprType(AST_NODE* exprNode) {
  * 3. void
  */
 DATA_TYPE checkType (const char name[]) {
-    typeDef* tmp = typeInt;
-    while (tmp != NULL) {
-        if (!strcmp(tmp->name, name))
-            return INT_TYPE;
-        tmp = tmp->next;
+    // first check if this is "int", "float" or "void"
+    if (!strcmp(name, "int")) {
+        return INT_TYPE;
     }
-    
-    tmp = typeFloat;
-    while (tmp != NULL) {
-        if (!strcmp(tmp->name, name))
-            return FLOAT_TYPE;
-        tmp = tmp->next;
+    else if (!strcmp(name, "float")) {
+        return FLOAT_TYPE;
+    }
+    else if (!strcmp(name, "void")) {
+        return VOID_TYPE;
     }
 
-    tmp = typeVoid;
-    while (tmp != NULL) {
-        if (!strcmp(tmp->name, name))
-            return VOID_TYPE;
-        tmp = tmp->next;
+    // now search it in symbolTable
+    SymbolTableEntry* symbol = retrieveSymbol(name, /*onlyInCurrentScope*/false);
+    if (symbol == NULL) {
+        return -1;
     }
-
-    fprintf(stderr, "type %s not found\n", name);
-    return -1;
+    else if (symbol->attribute->attributeKind != TYPE_ATTRIBUTE){
+        return -1;
+    }
+    else {
+        return symbol->attribute->attr.typeDescriptor->properties.dataType;
+    }
 }
 
 
@@ -239,9 +238,12 @@ void processDeclarationNode(AST_NODE* declarationNode) {
     switch (declarationNode->semantic_value.declSemanticValue.kind) {
         case VARIABLE_DECL:
             declareIdList(declarationNode, false);
+            break;
         case TYPE_DECL:
+            declareType(declarationNode);
             break;
         case FUNCTION_DECL:
+            declareFunction(declarationNode);
             break;
         case FUNCTION_PARAMETER_DECL:
             declareIdList(declarationNode, true);
@@ -253,8 +255,67 @@ void processDeclarationNode(AST_NODE* declarationNode) {
     }
 }
 
+void declareFunction(AST_NODE* declarationNode) {
+    int idx = 0;
+    DATA_TYPE type;
+    AST_NODE* returnType = declarationNode->child;
+    // SymbolTableEntry* symbol = newSymbolTableEntry();
 
-void processTypeNode(AST_NODE* idNodeAsType) {
+    // allocate for function name
+
+    
+}
+
+void declareType(AST_NODE* typeNode) {
+    int idx = 0;
+    DATA_TYPE type;
+    AST_NODE* dataType = typeNode->child;
+    
+    /**
+     * type can only be int, float or void
+     */
+    type = checkType(dataType->semantic_value.identifierSemanticValue.identifierName);
+    if (type == -1) {
+        printErrorMsg(dataType, SYMBOL_IS_NOT_TYPE);
+    }
+
+    for (AST_NODE* alias = dataType->rightSibling; alias != NULL; alias = alias->rightSibling) {
+        // first check if this name already exist in this scope
+        if (retrieveSymbol(alias->semantic_value.identifierSemanticValue.identifierName,
+                    /*onlyInCurrentScope*/true) != NULL) {
+            printErrorMsgSpecial(alias, alias->semantic_value.identifierSemanticValue.identifierName,
+                                SYMBOL_REDECLARE);
+            continue;
+        }
+
+        // allocate new symbol entry
+        SymbolTableEntry* symbol = newSymbolTableEntry();
+        symbol->name = strdup(alias->semantic_value.identifierSemanticValue.identifierName);
+        if (symbol->name == NULL) {
+            fprintf(stderr, "[SEMANTIC ERROR] error allocating memory for symbol name\n");
+            exit(255);
+        }
+        
+        // allocate for attribute
+        symbol->attribute = (SymbolAttribute*) malloc(sizeof(SymbolAttribute));
+        if (symbol->attribute == NULL) {
+            fprintf(stderr, "[SEMANTIC ERROR] error allocating memory for symbol attribute\n");
+            exit(255);
+        }
+        symbol->attribute->attributeKind = TYPE_ATTRIBUTE;
+
+        // allocate for typeDescriptor
+        symbol->attribute->attr.typeDescriptor = (TypeDescriptor*) malloc(sizeof(TypeDescriptor));
+        if (symbol->attribute->attr.typeDescriptor == NULL) {
+            fprintf(stderr, "[SEMANTIC ERROR] error allocating memory for symbol typeDescriptor\n");
+            exit(255);
+        }
+        symbol->attribute->attr.typeDescriptor->properties.dataType = type;
+
+        // add this symbol to symbolTable
+        addSymbol(symbol);
+    }
+
 }
 
 /**
@@ -273,16 +334,21 @@ void declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray) 
      * get declared type
      * this type name should not be a variable name
      */
-    if (retrieveSymbol(dataType->semantic_value.identifierSemanticValue.identifierName) != NULL) {
-        printErrorMsg(dataType, SYMBOL_IS_NOT_TYPE);
-        return;
-    }
     type = checkType(dataType->semantic_value.identifierSemanticValue.identifierName);
     if (type == -1) {
-        printErrorMsg(declarationNode, SYMBOL_UNDECLARED);
+        printErrorMsg(declarationNode, SYMBOL_IS_NOT_TYPE);
     }
 
     for (AST_NODE* variable = dataType->rightSibling; variable != NULL; variable = variable->rightSibling) {
+        // first check if this name is already used in this scope
+        if (retrieveSymbol(variable->semantic_value.identifierSemanticValue.identifierName,
+                    /*onlyInCurrentScope*/true) != NULL) {
+            printErrorMsgSpecial(variable, variable->semantic_value.identifierSemanticValue.identifierName,
+                                SYMBOL_REDECLARE);
+            continue;
+        }
+        
+        // allocate for new symbol
         SymbolTableEntry* symbol = newSymbolTableEntry();
         
         // set name, should not overflow as long as ID name is set correctly in parser
@@ -449,6 +515,4 @@ void processDeclDimList(AST_NODE* idNode, TypeDescriptor* typeDescriptor, int ig
 }
 
 
-void declareFunction(AST_NODE* declarationNode)
-{
-}
+

@@ -169,19 +169,5 @@ typedef struct AST_NODE AST_NODE;
 AST_NODE *Allocate(AST_TYPE type);
 void semanticAnalysis(AST_NODE *root);
 
-/**
- * for typedef
- * now we implement it as link list,
- * TODO: change it to hash table
- */
-typedef struct typeDef {
-    char name[256];
-    struct typeDef* next;
-} typeDef;
-
-typeDef* typeInt;
-typeDef* typeFloat;
-typeDef* typeVoid;
-
 
 #endif
