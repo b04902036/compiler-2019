@@ -102,7 +102,7 @@ SymbolTableEntry* retrieveSymbol(const char* symbolName, bool onlyInCurrentScope
  */
 void addSymbol(SymbolTableEntry* symbol) {
     int idx = HASH(symbol->name);
-    int hashTableId = symbolTable.totalHashTableCount - 1;
+    int hashTableId = symbol->nestingLevel - 1;
     addIntoHashChain(symbolTable.hashTable[hashTableId], idx, symbol);
 }
 
@@ -141,6 +141,7 @@ void openScope() {
 
     // 3.
     ++symbolTable.totalHashTableCount;
+    ++symbolTable.currentLevel;
 }
 
 /**
@@ -166,6 +167,7 @@ void closeScope() {
     symbolTable.totalScope[current] = symbolTable.hashTable[currentHash];
 
     // 3.
+    --symbolTable.currentLevel;
     --symbolTable.totalHashTableCount;
     ++symbolTable.totalScopeCount;
 }

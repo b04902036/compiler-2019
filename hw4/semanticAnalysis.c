@@ -1,6 +1,6 @@
 //TODO
-// 1. checkFunctionCall->checkParameterPassing->processExprRelatedNode->processExprRelatedNode
-// 2. processExprRelatedNode and processExprRelatedNode should be the same function
+// 1. checkFunctionCall->checkParameterPassing->processRelopExpr->processRelopExpr
+// 2. processRelopExpr and processRelopExpr should be the same function
 #include "header.h"
 #include "symbolTable.h"
 
@@ -17,11 +17,11 @@ int g_anyErrorOccur = 0;
 DATA_TYPE getBiggerType(DATA_TYPE dataType1, DATA_TYPE dataType2);
 int getExprType(AST_NODE* exprNode);
 DATA_TYPE checkType(const char name[]);
-DATA_TYPE processExprRelatedNode(AST_NODE* variable);
+DATA_TYPE processRelopExpr(AST_NODE* variable);
 
 void processProgramNode(AST_NODE *programNode);
 void processDeclarationNode(AST_NODE* declarationNode);
-void declareIdList(AST_NODE* typeNode, bool ignoreFirstDimensionOfArray);
+void declareIdList(AST_NODE* typeNode, bool ignoreFirstDimensionOfArray, Parameter* paramList);
 void declareFunction(AST_NODE* returnTypeNode);
 void declareType(AST_NODE* typeNode);
 void processDeclDimList(AST_NODE* variableDeclDimList, TypeDescriptor* typeDescriptor, int ignoreFirstDimSize);
@@ -82,11 +82,22 @@ void printErrorMsgSpecial(AST_NODE* node1, char* name2, ErrorMsgKind errorMsgKin
     g_anyErrorOccur = 1;
     printf("Error found in line %d\n", node1->linenumber);
     switch(errorMsgKind) {
+        case SYMBOL_IS_NOT_TYPE:
+            printf("unknown type name %s\n", name2);
+            break;
+        case SYMBOL_UNDECLARED:
+            printf("symbol %s undeclared\n", name2); 
+            break;
         case SYMBOL_REDECLARE:
             printf("symbol %s redeclared\n", name2);
             break;
+        case IS_FUNCTION_NOT_VARIABLE:
+            printf("symbol %s is function, not variable\n", name2);
         case TOO_FEW_ARGUMENTS:
             printf("too few arguments to function %s\n", name2);
+            break;
+        case TOO_MANY_ARGUMENTS:
+            printf("too many arguments to function %s\n", name2);
             break;
         case PARAMETER_TYPE_UNMATCH:
             printf("parameter pass to function %s didn't match the function signature\n", name2);
@@ -105,12 +116,6 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) {
     g_anyErrorOccur = 1;
     printf("Error found in line %d\n", node->linenumber);
     switch (errorMsgKind) {
-        case SYMBOL_IS_NOT_TYPE:
-            printf("unknown type name\n");
-            break;
-        case SYMBOL_UNDECLARED:
-            printf("symbol undeclared\n"); 
-            break;
         case ARRAY_SIZE_MISSING:
             printf("array size missing\n");
             break;
@@ -129,6 +134,9 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) {
         case INCOMPATIBLE_ARRAY_DIMENSION:
             printf("array subscription exceed array dimension\n");
             break;
+        case PARAMETER_TYPE_UNMATCH:
+            printf("parameter passed to function type mismatch\n");
+            break;
         default:
             printf("Unhandled case in void printErrorMsg(AST_NODE* node, ERROR_MSG_KIND* %d)\n", errorMsgKind);
             break;
@@ -144,7 +152,7 @@ void semanticAnalysis(AST_NODE *root)
 /**
  * Check if this relop_expr is legal, and return type of this expression
  */
-DATA_TYPE processExprRelatedNode(AST_NODE* variable) {
+DATA_TYPE processRelopExpr(AST_NODE* variable) {
     SymbolTableEntry* symbol;
     DATA_TYPE dataType1, dataType2;
     switch (variable->nodeType) {
@@ -163,8 +171,8 @@ DATA_TYPE processExprRelatedNode(AST_NODE* variable) {
         case EXPR_NODE:
             switch (variable->semantic_value.exprSemanticValue.kind) {
                 case BINARY_OPERATION:
-                    dataType1 = processExprRelatedNode(variable->child);
-                    dataType2 = processExprRelatedNode(variable->child->rightSibling);
+                    dataType1 = processRelopExpr(variable->child);
+                    dataType2 = processRelopExpr(variable->child->rightSibling);
                     if (dataType1 == VOID_TYPE || dataType2 == VOID_TYPE) {
                         printErrorMsg(variable, VOID_OPERATION);
                         return ERROR_TYPE;
@@ -217,7 +225,7 @@ DATA_TYPE processExprRelatedNode(AST_NODE* variable) {
                      * there are only two kinds of unary operation : "!" and "-"
                      * we allowed "!" on string constant and it will return INT_TYPE
                      */
-                    dataType1 = processExprRelatedNode(variable);
+                    dataType1 = processRelopExpr(variable);
                     switch (dataType1) {
                         case VOID_TYPE:
                             printErrorMsg(variable, VOID_OPERATION);
@@ -255,10 +263,14 @@ DATA_TYPE processExprRelatedNode(AST_NODE* variable) {
             }
             
             /**
-             * if it is scalar, return it
+             * if it is function pointer, print error
+             * otherwise if it is scalar, return it
              * otherwise we check if it is an array slice
              */
-            if (symbol->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR) {
+            if (symbol->attribute->attributeKind == FUNCTION_SIGNATURE) {
+                printErrorMsgSpecial(variable, symbol->name, IS_FUNCTION_NOT_VARIABLE);
+            }
+            else if (symbol->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR) {
                 return SCALAR_TYPE_DESCRIPTOR;
             }
             else {
@@ -268,7 +280,7 @@ DATA_TYPE processExprRelatedNode(AST_NODE* variable) {
                 AST_NODE* index = variable->child;
                 while (index != NULL) {
                     ++indexCount;
-                    indexType = processExprRelatedNode(index);
+                    indexType = processRelopExpr(index);
                     if (indexType != INT_TYPE) {
                         printErrorMsg(index, ARRAY_SUBSCRIPT_NOT_INT);
                     }
@@ -291,7 +303,7 @@ DATA_TYPE processExprRelatedNode(AST_NODE* variable) {
                 exit(255);
             }
             variable = variable->child;
-
+            
             /**
              * function can only return scalar or void
              * get function signature and check passed parameter
@@ -361,7 +373,7 @@ int getExprType(AST_NODE* exprNode) {
  * 1. int
  * 2. float
  * 3. void
- * return -1 if not found or this type is a variable
+ * return ERROR_TYPE if not found or this type is a variable
  */
 DATA_TYPE checkType (const char name[]) {
     // first check if this is "int", "float" or "void"
@@ -378,10 +390,10 @@ DATA_TYPE checkType (const char name[]) {
     // now search it in symbolTable
     SymbolTableEntry* symbol = retrieveSymbol(name, /*onlyInCurrentScope*/false);
     if (symbol == NULL) {
-        return -1;
+        return ERROR_TYPE;
     }
     else if (symbol->attribute->attributeKind != TYPE_ATTRIBUTE){
-        return -1;
+        return ERROR_TYPE;
     }
     else {
         return symbol->attribute->attr.typeDescriptor->properties.dataType;
@@ -418,7 +430,7 @@ void processProgramNode(AST_NODE *programNode) {
 void processDeclarationNode(AST_NODE* declarationNode) {
     switch (declarationNode->semantic_value.declSemanticValue.kind) {
         case VARIABLE_DECL:
-            declareIdList(declarationNode, false);
+            declareIdList(declarationNode, false, NULL);
             break;
         case TYPE_DECL:
             declareType(declarationNode);
@@ -426,25 +438,93 @@ void processDeclarationNode(AST_NODE* declarationNode) {
         case FUNCTION_DECL:
             declareFunction(declarationNode);
             break;
-        case FUNCTION_PARAMETER_DECL:
-            declareIdList(declarationNode, true);
-            break;
         default:
             fprintf(stderr, "no such DECL kind\n");
             exit(255);
-
     }
 }
 
 void declareFunction(AST_NODE* declarationNode) {
-    int idx = 0;
-    DATA_TYPE type;
     AST_NODE* returnType = declarationNode->child;
-    // SymbolTableEntry* symbol = newSymbolTableEntry();
-
-    // allocate for function name
-
+    AST_NODE* functionName = returnType->rightSibling;
+    AST_NODE* functionParam = functionName->rightSibling;
+    Parameter* parameterList;
+    DATA_TYPE type;
+    SymbolTableEntry* symbol;
+    int parameterCount = 0;
     
+
+    // first we need to check if this function name is used
+    symbol = retrieveSymbol(functionName->semantic_value.identifierSemanticValue.identifierName, 
+                        /*onlyInCurrentScope*/false);
+    if (symbol != NULL) {
+        printErrorMsgSpecial(functionName, symbol->name, SYMBOL_REDECLARE);
+    }
+    else {
+        /**
+         * remember this function name is declared out of the function body
+         * so we have to allocate new symbol "before" we open a new scope for function body
+         */
+        symbol = newSymbolTableEntry();
+        openScope();
+
+        // set name, should not overflow as long as ID name is set correctly in parser
+        symbol->name = strdup(functionName->semantic_value.identifierSemanticValue.identifierName);
+        if (symbol->name == NULL) {
+            fprintf(stderr, "[SEMANTIC CHECK ERROR] fail to allocate memory for variable name\n");
+            exit(255);
+        }
+
+        // allocate memory for symbol->attribute
+        symbol->attribute = (SymbolAttribute*) malloc(sizeof(SymbolAttribute));
+        if (symbol->attribute == NULL) {
+            fprintf(stderr, "[SEMANTIC CHECK ERROR] fail to allocate memory for symbol attribute\n");
+            exit(255);
+        }
+        symbol->attribute->attributeKind = FUNCTION_SIGNATURE;
+        
+        // allocate for typeDescriptor
+        symbol->attribute->attr.functionSignature = (FunctionSignature*) malloc(sizeof(FunctionSignature));
+        if (symbol->attribute->attr.typeDescriptor == NULL) {
+            fprintf(stderr, "[SEMANTIC CHECK ERROR] fail to allocate memory for symbol attribute\n");
+            exit(255);
+        }
+        type = checkType(returnType->semantic_value.identifierSemanticValue.identifierName);
+        if (type == ERROR_TYPE) {
+            printErrorMsgSpecial(returnType, returnType->semantic_value.identifierSemanticValue.identifierName,
+                            SYMBOL_IS_NOT_TYPE);
+        }
+        symbol->attribute->attr.functionSignature->returnType = type;
+        symbol->attribute->attr.functionSignature->parameterList = NULL;
+
+        for (functionParam = functionParam->child; functionParam != NULL; functionParam = functionParam->rightSibling) {
+            if (parameterCount == 0) {
+                parameterList = (Parameter*) malloc(sizeof(Parameter));
+                if (parameterList == NULL) {
+                    fprintf(stderr, "[SEMANTIC ERROR] fail to allocate memory for parameterlist\n");
+                    exit(255);
+                }
+                symbol->attribute->attr.functionSignature->parameterList = parameterList;
+            }
+            else {
+                parameterList->next = (Parameter*) malloc(sizeof(Parameter));
+                if (parameterList->next == NULL) {
+                    fprintf(stderr, "[SEMANTIC ERROR] fail to allocate memory for parameterlist\n");
+                    exit(255);
+                }
+                parameterList = parameterList->next;
+            }
+            declareIdList(functionParam, /*ignoreFirstDimensionOfArray*/true, parameterList);
+            ++parameterCount;
+        }
+        symbol->attribute->attr.functionSignature->parametersCount = parameterCount;
+
+        // now symbol is ready, add this into symbolTable
+        addSymbol(symbol);
+
+        // leaving, close scope
+        closeScope();
+    }
 }
 
 void declareType(AST_NODE* typeNode) {
@@ -456,8 +536,9 @@ void declareType(AST_NODE* typeNode) {
      * type can only be int, float or void
      */
     type = checkType(dataType->semantic_value.identifierSemanticValue.identifierName);
-    if (type == -1) {
-        printErrorMsg(dataType, SYMBOL_IS_NOT_TYPE);
+    if (type == ERROR_TYPE) {
+        printErrorMsgSpecial(dataType, dataType->semantic_value.identifierSemanticValue.identifierName,
+                        SYMBOL_IS_NOT_TYPE);
     }
 
     for (AST_NODE* alias = dataType->rightSibling; alias != NULL; alias = alias->rightSibling) {
@@ -496,7 +577,7 @@ void declareType(AST_NODE* typeNode) {
         // add this symbol to symbolTable
         addSymbol(symbol);
     }
-
+    
 }
 
 /**
@@ -506,7 +587,7 @@ void declareType(AST_NODE* typeNode) {
  *  2. FUNCTION_PARAMETER_DECL
  * the only difference is in FUNCTION_PARAMETER_DECL, we can ignore first dimension of array definition
  */
-void declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray) {
+void declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray, Parameter* paramList) {
     int idx = 0;
     DATA_TYPE type;
     AST_NODE* dataType = declarationNode->child;
@@ -516,8 +597,9 @@ void declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray) 
      * this type name should not be a variable name
      */
     type = checkType(dataType->semantic_value.identifierSemanticValue.identifierName);
-    if (type == -1) {
-        printErrorMsg(declarationNode, SYMBOL_IS_NOT_TYPE);
+    if (type == ERROR_TYPE) {
+        printErrorMsgSpecial(declarationNode, dataType->semantic_value.identifierSemanticValue.identifierName,
+                        SYMBOL_IS_NOT_TYPE);
     }
     
     /**
@@ -597,23 +679,50 @@ void declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray) 
             case WITH_INIT_ID:
                 symbol->attribute->attr.typeDescriptor->kind = SCALAR_TYPE_DESCRIPTOR;
                 symbol->attribute->attr.typeDescriptor->properties.dataType = type;
+                processRelopExpr(variable->child);
                 break;
             default:
                 fprintf(stderr, "[PARSER ERROR] no such kind of IdentifierSemanticValue\n");
         } // switch, variable type
 
-    /**
-     * now symbolTableEntry is ready
-     * we need to add it into symbolTable
-     */
-    addSymbol(symbol);
+        /**
+         * now symbolTableEntry is ready
+         * we need to add it into symbolTable
+         */
+        addSymbol(symbol);
 
+        /**
+         * if ignoreFirstDimensionOfArray is true, means we are dealing with function parameter
+         * and each type should not be followed with two or more variables
+         * and we need to add this symbol to parameter list of this function
+         */
+        if (ignoreFirstDimensionOfArray) {
+            // set parameter name
+            paramList->parameterName = strdup(symbol->name);
+            if (paramList->parameterName == NULL) {
+                fprintf(stderr, "[SEMANTIC ERROR] fail to allocate memory for parameter name\n");
+                exit(255);
+            }
+            
+            // set parameter type
+            paramList->type = (TypeDescriptor*) malloc(sizeof(TypeDescriptor));
+            if (paramList->type == NULL) {
+                fprintf(stderr, "[SEMANTIC ERROR] fail to allocate memory for parameter type\n");
+                exit(255);
+            }
+            paramList->type->kind = symbol->attribute->attr.typeDescriptor->kind;
+            if (paramList->type->kind == SCALAR_TYPE_DESCRIPTOR) {
+                paramList->type->properties.dataType = symbol->attribute->attr.typeDescriptor->properties.dataType;
+            }
+            else {
+                paramList->type->properties.arrayProperties = symbol->attribute->attr.typeDescriptor->properties.arrayProperties;
+            }
+
+            paramList->next = NULL;
+            break;
+        }
     } // for, over variable
 }
-
-/**
- * check relop_expr
- */
 void checkAssignOrExpr(AST_NODE* assignOrExprRelatedNode) {
 }
 
@@ -663,17 +772,21 @@ void checkParameterPassing(AST_NODE* passedParameter, Parameter* expectParam, ch
             expectParam == NULL) {
         return;
     }
+    else if (passedParameter->nodeType == NUL_NODE) {
+        printErrorMsgSpecial(passedParameter, name, TOO_FEW_ARGUMENTS);
+        return;
+    }
     else if (passedParameter->nodeType == NONEMPTY_RELOP_EXPR_LIST_NODE) {
         // check if type is correct
         AST_NODE* param = passedParameter->child;
 
         for (; expectParam != NULL; expectParam = expectParam->next) {
             if (param == NULL) {
-                printErrorMsgSpecial(param, name, TOO_FEW_ARGUMENTS);
+                printErrorMsgSpecial(passedParameter, name, TOO_FEW_ARGUMENTS);
                 return;
             }
             
-            paramType = processExprRelatedNode(param);
+            paramType = processRelopExpr(param);
             switch (paramType) {
                 case INT_TYPE:
                 case FLOAT_TYPE:
@@ -691,12 +804,11 @@ void checkParameterPassing(AST_NODE* passedParameter, Parameter* expectParam, ch
                 printErrorMsg(param, PARAMETER_TYPE_UNMATCH);
             }
             param = param->rightSibling;
-            expectParam = expectParam->next;
         }
 
         // param should be NULL now, if not ...
         if (param != NULL) {
-            printErrorMsg(param, TOO_FEW_ARGUMENTS);
+            printErrorMsgSpecial(param, name, TOO_MANY_ARGUMENTS);
         }
     }
     else {
