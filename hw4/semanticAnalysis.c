@@ -225,7 +225,7 @@ DATA_TYPE processRelopExpr(AST_NODE* variable) {
                      * there are only two kinds of unary operation : "!" and "-"
                      * we allowed "!" on string constant and it will return INT_TYPE
                      */
-                    dataType1 = processRelopExpr(variable);
+                    dataType1 = processRelopExpr(variable->child);
                     switch (dataType1) {
                         case VOID_TYPE:
                             printErrorMsg(variable, VOID_OPERATION);
