@@ -271,7 +271,7 @@ DATA_TYPE processRelopExpr(AST_NODE* variable) {
                 printErrorMsgSpecial(variable, symbol->name, IS_FUNCTION_NOT_VARIABLE);
             }
             else if (symbol->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR) {
-                return SCALAR_TYPE_DESCRIPTOR;
+                return symbol->attribute->attr.typeDescriptor->properties.dataType;
             }
             else {
                 int indexCount = 0;
@@ -287,10 +287,10 @@ DATA_TYPE processRelopExpr(AST_NODE* variable) {
                     index = index->rightSibling;
                 }
                 if (indexCount < maxIndexCount) {
-                    return ARRAY_TYPE_DESCRIPTOR;
+                    return INT_PTR_TYPE;
                 }
                 else if (indexCount == maxIndexCount) {
-                    return SCALAR_TYPE_DESCRIPTOR;
+                    return symbol->attribute->attr.typeDescriptor->properties.dataType;
                 }
                 else {
                     printErrorMsg(variable, INCOMPATIBLE_ARRAY_DIMENSION);
