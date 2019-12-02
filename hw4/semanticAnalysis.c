@@ -1,6 +1,5 @@
-//TODO
-// 1. checkFunctionCall->checkParameterPassing->processRelopExpr->processRelopExpr
-// 2. processRelopExpr and processRelopExpr should be the same function
+// TODO
+//  check function return type and declared type
 #include "header.h"
 #include "symbolTable.h"
 
@@ -142,6 +141,9 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) {
             break;
         case ARRAY_SIZE_NOT_INT:
             printf("array size should be int\n");
+            break;
+        case ARRAY_SUBSCRIPT_NOT_INT:
+            printf("array index should be int\n");
             break;
         case VOID_OPERATION:
             printf("operation should not be done on variable with void type\n");
@@ -319,6 +321,7 @@ void declareFunction(AST_NODE* declarationNode) {
     AST_NODE* returnType = declarationNode->child;
     AST_NODE* functionName = returnType->rightSibling;
     AST_NODE* functionParam = functionName->rightSibling;
+    AST_NODE* block = functionParam->rightSibling;
     Parameter* parameterList;
     DATA_TYPE type;
     SymbolTableEntry* symbol;
@@ -337,7 +340,6 @@ void declareFunction(AST_NODE* declarationNode) {
          * so we have to allocate new symbol "before" we open a new scope for function body
          */
         symbol = newSymbolTableEntry();
-        openScope();
 
         // set name, should not overflow as long as ID name is set correctly in parser
         symbol->name = strdup(functionName->semantic_value.identifierSemanticValue.identifierName);
@@ -368,6 +370,7 @@ void declareFunction(AST_NODE* declarationNode) {
         symbol->attribute->attr.functionSignature->returnType = type;
         symbol->attribute->attr.functionSignature->parameterList = NULL;
 
+        openScope();
         for (functionParam = functionParam->child; functionParam != NULL; functionParam = functionParam->rightSibling) {
             if (parameterCount == 0) {
                 parameterList = (Parameter*) malloc(sizeof(Parameter));
@@ -385,6 +388,7 @@ void declareFunction(AST_NODE* declarationNode) {
                 }
                 parameterList = parameterList->next;
             }
+
             declareIdList(functionParam, /*ignoreFirstDimensionOfArray*/true, parameterList);
             ++parameterCount;
         }
@@ -392,6 +396,9 @@ void declareFunction(AST_NODE* declarationNode) {
 
         // now symbol is ready, add this into symbolTable
         addSymbol(symbol);
+
+        // now we deal with function body
+        processBlockNode(block);
 
         // leaving, close scope
         closeScope();
@@ -805,22 +812,17 @@ void checkParameterPassing(AST_NODE* passedParameter, Parameter* expectParam, ch
                     translatedType = -1;
                     break;
             }
-            if (translatedType != expectParam->type->kind) {
-                //printErrorMsg(param, PARAMETER_TYPE_UNMATCH);                     I change it.
-                if(translatedType = SCALAR_TYPE_DESCRIPTOR && expectParam->type->kind == ARRAY_TYPE_DESCRIPTOR)
-                {
-                    printErrorMsgSpecial2(param->linenumber, 
-                                          param->semantic_value.identifierSemanticValue.identifierName, 
-                                          expectParam->parameterName, 
-                                          PASS_ARRAY_TO_SCALAR);
-                }
-                else if(translatedType = ARRAY_TYPE_DESCRIPTOR && expectParam->type->kind == SCALAR_TYPE_DESCRIPTOR)
-                {
-                    printErrorMsgSpecial2(param->linenumber,
-                                          param->semantic_value.identifierSemanticValue.identifierName,
-                                          expectParam->parameterName, 
-                                          PASS_SCALAR_TO_ARRAY);
-                }
+            if(translatedType == SCALAR_TYPE_DESCRIPTOR && expectParam->type->kind == ARRAY_TYPE_DESCRIPTOR) {
+                printErrorMsgSpecial2(param->linenumber, 
+                                      param->semantic_value.identifierSemanticValue.identifierName, 
+                                      expectParam->parameterName, 
+                                      PASS_SCALAR_TO_ARRAY);
+            }
+            else if(translatedType == ARRAY_TYPE_DESCRIPTOR && expectParam->type->kind == SCALAR_TYPE_DESCRIPTOR) {
+                printErrorMsgSpecial2(param->linenumber,
+                                      param->semantic_value.identifierSemanticValue.identifierName,
+                                      expectParam->parameterName, 
+                                      PASS_ARRAY_TO_SCALAR);
             }
             param = param->rightSibling;
         }
@@ -847,7 +849,7 @@ void evaluateExprValue(AST_NODE* exprNode)
 }
 
 /*
- * The subtree is data, or uniry/binary operation of data.
+ * The subtree is data, or unary/binary operation of data.
  * We need to check whether the data type is consistent
  *      1. no void type
  *      2. no string type
@@ -857,6 +859,7 @@ void evaluateExprValue(AST_NODE* exprNode)
 void processExprNode(AST_NODE* exprNode)
 {
     DATA_TYPE dataType1, dataType2;
+    int type = exprNode->semantic_value.exprSemanticValue.kind;
     switch (exprNode->semantic_value.exprSemanticValue.kind) {
         case BINARY_OPERATION:
             dataType1 = processRelopExpr(exprNode->child);
@@ -887,9 +890,9 @@ void processExprNode(AST_NODE* exprNode)
             return;
         case UNARY_OPERATION:
             /**
-            * there are only two kinds of unary operation : "!" and "-"
-            * we allowed "!" on string constant and it will return INT_TYPE    <--   I discard this implemntation due to not meaningful enough.
-            */
+             * there are only two kinds of unary operation : "!" and "-"
+             * we allowed "!" on string constant and it will return INT_TYPE    <--   I discard this implemntation due to not meaningful enough.
+             */
             dataType1 = processRelopExpr(exprNode->child);
             switch (dataType1) {
                 case VOID_TYPE:                                                         // void
@@ -915,7 +918,7 @@ void processExprNode(AST_NODE* exprNode)
                     exprNode->dataType = ERROR_TYPE;
                     break;
             }
-
+            break;
         default:
             fprintf(stderr, "[PARSER ERROR] no such type of expr\n");
             exit(255);
