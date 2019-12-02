@@ -502,13 +502,13 @@ stmt		: MK_LBRACE block MK_RBRACE
                     $$ = makeStmtNode(ASSIGN_STMT);
                     makeFamily($$, 2, $1, $3);
                 }
-            | IF MK_LPAREN relop_expr MK_RPAREN stmt
+            | IF MK_LPAREN assign_expr MK_RPAREN stmt
                 {
                     /* done */
                     $$ = makeStmtNode(IF_STMT);
                     makeFamily($$, 2, $3, $5);
                 }
-            | IF MK_LPAREN relop_expr MK_RPAREN stmt ELSE stmt
+            | IF MK_LPAREN assign_expr MK_RPAREN stmt ELSE stmt
                 {
                     /* done */
                     $$ = makeStmtNode(IF_STMT);

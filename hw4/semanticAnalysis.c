@@ -39,11 +39,13 @@ void checkFunctionCall(AST_NODE* functionCallNode);
 void checkParameterPassing(AST_NODE* passedParameter, Parameter* expectParam, char* name);
 void checkReturnStmt(AST_NODE* returnNode);
 void processExprNode(AST_NODE* exprNode);
-void processVariableLValue(AST_NODE* idNode);
+DATA_TYPE processVariableLValue(AST_NODE* idNode);  // change return type
 void processVariableRValue(AST_NODE* idNode);
 void processConstValueNode(AST_NODE* constValueNode);
 void getExprOrConstValue(AST_NODE* exprOrConstNode, int* iValue, float* fValue);
 void evaluateExprValue(AST_NODE* exprNode);
+
+
 
 
 typedef enum ErrorMsgKind
@@ -77,6 +79,22 @@ typedef enum ErrorMsgKind
 } ErrorMsgKind;
 
 
+void printErrorMsgSpecial2(int linenumber, char* name1, char* name2, ErrorMsgKind errorMsgKind)
+{
+    g_anyErrorOccur = 1;
+    printf("Error found in line %d\n", linenumber);
+    switch(errorMsgKind) {
+        case PASS_ARRAY_TO_SCALAR:
+            printf("Array < %s > passed to scalar parameter < %s >.\n", name1, name2);
+            break;
+        case PASS_SCALAR_TO_ARRAY:
+            printf("Scalar < %s > passed to array parameter < %s >.\n", name1, name2);
+            break;
+        default:
+            printf("Unhandled case in void printErrorMsgSpecial2(char* name1, char* name2, ErrorMsgKind* %d)\n", errorMsgKind);
+            break;
+    }
+}
 void printErrorMsgSpecial(AST_NODE* node1, char* name2, ErrorMsgKind errorMsgKind)
 {
     g_anyErrorOccur = 1;
@@ -105,6 +123,9 @@ void printErrorMsgSpecial(AST_NODE* node1, char* name2, ErrorMsgKind errorMsgKin
         case NOT_FUNCTION_NAME:
             printf("%s is not a function name\n", name2);
             break;
+        case IS_TYPE_NOT_VARIABLE:
+            printf("%s is a type, not a varable\n", name2);
+            break;
         default:
             printf("Unhandled case in void printErrorMsgSpecial(AST_NODE* node, ERROR_MSG_KIND* %d)\n", errorMsgKind);
             break;
@@ -132,10 +153,13 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) {
             printf("variable declared with type void\n");
             break;
         case INCOMPATIBLE_ARRAY_DIMENSION:
-            printf("array subscription exceed array dimension\n");
+            printf("array subscription exceed array dimension (Incompatible array dimensions.) \n");    // change
             break;
         case PARAMETER_TYPE_UNMATCH:
             printf("parameter passed to function type mismatch\n");
+            break;
+        case RETURN_TYPE_UNMATCH:
+            printf("Incompatible return type.\n");
             break;
         default:
             printf("Unhandled case in void printErrorMsg(AST_NODE* node, ERROR_MSG_KIND* %d)\n", errorMsgKind);
@@ -151,178 +175,16 @@ void semanticAnalysis(AST_NODE *root)
 
 /**
  * Check if this relop_expr is legal, and return type of this expression
+ * We need to put the datatype in to variable->dataType after calling these functions.
+ * 
+ * May be called from declaration, or statement.
  */
 DATA_TYPE processRelopExpr(AST_NODE* variable) {
-    SymbolTableEntry* symbol;
-    DATA_TYPE dataType1, dataType2;
-    switch (variable->nodeType) {
-        case CONST_VALUE_NODE:
-            switch (variable->semantic_value.const1->const_type) {
-                case INTEGERC:
-                    return INT_TYPE;
-                case FLOATC:
-                    return FLOAT_TYPE;
-                case STRINGC:
-                    return CONST_STRING_TYPE;
-                default:
-                    fprintf(stderr, "[PARSER ERROR] no such constant type\n");
-                    exit(255);
-            }
-        case EXPR_NODE:
-            switch (variable->semantic_value.exprSemanticValue.kind) {
-                case BINARY_OPERATION:
-                    dataType1 = processRelopExpr(variable->child);
-                    dataType2 = processRelopExpr(variable->child->rightSibling);
-                    if (dataType1 == VOID_TYPE || dataType2 == VOID_TYPE) {
-                        printErrorMsg(variable, VOID_OPERATION);
-                        return ERROR_TYPE;
-                    }
-                    if (dataType1 == ERROR_TYPE || dataType1 == NONE_TYPE 
-                                || dataType2 == ERROR_TYPE || dataType2 == NONE_TYPE) {
-                        return ERROR_TYPE;
-                    }
-
-                    // if this operation is rel_op, then it will return 1 or 0
-                    switch (variable->semantic_value.exprSemanticValue.op.binaryOp) {
-                        case BINARY_OP_EQ:
-                        case BINARY_OP_GE:
-                        case BINARY_OP_LE:
-                        case BINARY_OP_NE:
-                        case BINARY_OP_GT:
-                        case BINARY_OP_LT:
-                            return INT_TYPE;
-                        default:
-                            break;
-                    }
-
-                    // otherwise check if this is operation between string
-                    // also change pointer type to int
-                    switch (dataType1) {
-                        case CONST_STRING_TYPE:
-                            printErrorMsg(variable, STRING_OPERATION);
-                            return ERROR_TYPE;
-                        case INT_PTR_TYPE:
-                        case FLOAT_PTR_TYPE:
-                            dataType1 = INT_TYPE;
-                        default:
-                            break;
-                    }
-
-                    switch (dataType2) {
-                        case CONST_STRING_TYPE:
-                            printErrorMsg(variable, STRING_OPERATION);
-                            return ERROR_TYPE;
-                        case INT_PTR_TYPE:
-                        case FLOAT_PTR_TYPE:
-                            dataType1 = INT_TYPE;
-                        default:
-                            break;
-                    }
-                    
-                    return getBiggerType(dataType1, dataType2);
-                case UNARY_OPERATION:
-                    /**
-                     * there are only two kinds of unary operation : "!" and "-"
-                     * we allowed "!" on string constant and it will return INT_TYPE
-                     */
-                    dataType1 = processRelopExpr(variable->child);
-                    switch (dataType1) {
-                        case VOID_TYPE:
-                            printErrorMsg(variable, VOID_OPERATION);
-                            return ERROR_TYPE;
-                        case CONST_STRING_TYPE:
-                            if (variable->semantic_value.exprSemanticValue.op.unaryOp == UNARY_OP_NEGATIVE) {
-                                printErrorMsg(variable, STRING_OPERATION);
-                                return ERROR_TYPE;
-                            }
-                            return INT_TYPE;
-                        case INT_PTR_TYPE:
-                        case FLOAT_PTR_TYPE:
-                        case INT_TYPE:
-                            return INT_TYPE;
-                        case FLOAT_TYPE:
-                            if (variable->semantic_value.exprSemanticValue.op.unaryOp == UNARY_OP_NEGATIVE) {
-                                return FLOAT_TYPE;
-                            }
-                            return INT_TYPE;
-                        default:
-                            return ERROR_TYPE;
-                    }
-
-                default:
-                    fprintf(stderr, "[PARSER ERROR] no such type of expr\n");
-                    exit(255);
-            }
-        case IDENTIFIER_NODE:
-            symbol = retrieveSymbol(variable->semantic_value.identifierSemanticValue.identifierName, 
-                                /*onlyInCurrentScope*/false);
-            if (symbol == NULL) {
-                printErrorMsgSpecial(variable, variable->semantic_value.identifierSemanticValue.identifierName,
-                                    SYMBOL_UNDECLARED);
-                return -1;
-            }
-            
-            /**
-             * if it is function pointer, print error
-             * otherwise if it is scalar, return it
-             * otherwise we check if it is an array slice
-             */
-            if (symbol->attribute->attributeKind == FUNCTION_SIGNATURE) {
-                printErrorMsgSpecial(variable, symbol->name, IS_FUNCTION_NOT_VARIABLE);
-            }
-            else if (symbol->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR) {
-                return symbol->attribute->attr.typeDescriptor->properties.dataType;
-            }
-            else {
-                int indexCount = 0;
-                int maxIndexCount = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.dimension;
-                DATA_TYPE indexType;
-                AST_NODE* index = variable->child;
-                while (index != NULL) {
-                    ++indexCount;
-                    indexType = processRelopExpr(index);
-                    if (indexType != INT_TYPE) {
-                        printErrorMsg(index, ARRAY_SUBSCRIPT_NOT_INT);
-                    }
-                    index = index->rightSibling;
-                }
-                if (indexCount < maxIndexCount) {
-                    return INT_PTR_TYPE;
-                }
-                else if (indexCount == maxIndexCount) {
-                    return symbol->attribute->attr.typeDescriptor->properties.dataType;
-                }
-                else {
-                    printErrorMsg(variable, INCOMPATIBLE_ARRAY_DIMENSION);
-                    return -1;
-                }
-            }
-        case STMT_NODE:
-            if (variable->semantic_value.stmtSemanticValue.kind != FUNCTION_CALL_STMT) {
-                fprintf(stderr, "[PARSER ERROR] should only contain function call statement here\n");
-                exit(255);
-            }
-            variable = variable->child;
-            
-            /**
-             * function can only return scalar or void
-             * get function signature and check passed parameter
-             */
-            symbol = retrieveSymbol(variable->semantic_value.identifierSemanticValue.identifierName, 
-                                /*onlyInCurrentScope*/false);
-            if (symbol == NULL) {
-                printErrorMsgSpecial(variable, variable->semantic_value.identifierSemanticValue.identifierName,
-                                        SYMBOL_UNDECLARED);
-            }
-            else if (symbol->attribute->attributeKind != FUNCTION_SIGNATURE) {
-                printErrorMsgSpecial(variable, symbol->name, NOT_FUNCTION_NAME);
-            }
-            else if (symbol->attribute->attr.functionSignature->returnType == VOID_TYPE) {
-                printErrorMsgSpecial(variable, symbol->name, PARAMETER_TYPE_UNMATCH);
-            }
-            checkParameterPassing(variable->rightSibling, symbol->attribute->attr.functionSignature->parameterList, symbol->name);
-            return SCALAR_TYPE_DESCRIPTOR;
-    }
+    if(variable->nodeType == EXPR_NODE)             processExprNode(variable);          // INT_TYPE / FLOAT_TYPE
+    else if(variable->nodeType == STMT_NODE)        checkFunctionCall(variable);        // INT_TYPE / FLOAT_TYPE / VOID_TYPE
+    else if(variable->nodeType == IDENTIFIER_NODE)  processVariableRValue(variable);    // INT_TYPE / FLOAT_TYPE / INT_PTR_TYPE / FLOAT_PTR_TYPE
+    else if(variable->nodeType == CONST_VALUE_NODE) processConstValueNode(variable);    // INT_TYPE / FLOAT_TYPE / CONST_STRING_TYPE;
+    return variable->dataType;
 }
 
 DATA_TYPE getBiggerType(DATA_TYPE dataType1, DATA_TYPE dataType2) {
@@ -339,8 +201,12 @@ DATA_TYPE getBiggerType(DATA_TYPE dataType1, DATA_TYPE dataType2) {
  * propagate type of an exprNode from bottom to top
  * use DFS here
  * return INT_TYPE or FLOAT_TYPE
+ * 
+ * TODO :
+ *      1. Should we store these semantic value into AST_NODE to prevent recalculation?
+ *      2. What's the relationship between processExprNode()
  */
-int getExprType(AST_NODE* exprNode) {
+int getExprType(AST_NODE* exprNode) { 
     switch (exprNode->nodeType) {
         case CONST_VALUE_NODE:
             switch (exprNode->semantic_value.const1->const_type) {
@@ -374,6 +240,8 @@ int getExprType(AST_NODE* exprNode) {
  * 2. float
  * 3. void
  * return ERROR_TYPE if not found or this type is a variable
+ *
+ * Used in declaration
  */
 DATA_TYPE checkType (const char name[]) {
     // first check if this is "int", "float" or "void"
@@ -411,10 +279,10 @@ void processProgramNode(AST_NODE *programNode) {
 
     for (start = programNode->child; start != NULL; start = start->rightSibling) {
         switch (start->nodeType) {
-            case DECLARATION_NODE:
+            case DECLARATION_NODE:                  // function declaration
                 processDeclarationNode(start);
                 break;
-            case VARIABLE_DECL_LIST_NODE:
+            case VARIABLE_DECL_LIST_NODE:           // decl_list 
                 for (tmp = start->child; tmp != NULL; tmp = tmp->rightSibling) {
                     processDeclarationNode(tmp);
                 }
@@ -425,17 +293,20 @@ void processProgramNode(AST_NODE *programNode) {
         }
     }
     fprintf(stderr, "finish processing program node\n"); 
+    
+    // added, close a scope for global declaration
+    closeScope();   
 }
 
 void processDeclarationNode(AST_NODE* declarationNode) {
     switch (declarationNode->semantic_value.declSemanticValue.kind) {
-        case VARIABLE_DECL:
+        case VARIABLE_DECL:                                 // int a, b, c[];
             declareIdList(declarationNode, false, NULL);
             break;
-        case TYPE_DECL:
+        case TYPE_DECL:                                     // typedef int aaa
             declareType(declarationNode);
             break;
-        case FUNCTION_DECL:
+        case FUNCTION_DECL:                                 // int f(int a, int b){}
             declareFunction(declarationNode);
             break;
         default:
@@ -723,33 +594,157 @@ void declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray, 
         }
     } // for, over variable
 }
+
+
 void checkAssignOrExpr(AST_NODE* assignOrExprRelatedNode) {
+    if(assignOrExprRelatedNode->nodeType == STMT_NODE)      // Assign Statement
+    {
+        checkAssignmentStmt(assignOrExprRelatedNode);
+    }
+    else                                                    // Relop Expression ( data type cannot stated by if statement)
+    {
+        DATA_TYPE catch = processRelopExpr(assignOrExprRelatedNode);
+    }
 }
 
+/* In the following 6 functions, we assume that the following functions are well worked.
+ *           void checkAssignOrExpr(AST_NODE* assignOrExprRelatedNode);
+ *      DATA_TYPE processRelopExpr(AST_NODE* variable)
+ *           void processStmtNode(AST_NODE* stmtNode)
+ */      
+// ----------   check statment    start --------------
 void checkWhileStmt(AST_NODE* whileNode)
 {
+    AST_NODE *test = whileNode->child;
+    AST_NODE *stmt = test->rightSibling;
+    checkAssignOrExpr(test);
+    processStmtNode(stmt);
+
+    if(test->nodeType == ERROR_TYPE || stmt->nodeType == ERROR_TYPE){
+        whileNode->nodeType = ERROR_TYPE;
+    }
 }
 
 
 void checkForStmt(AST_NODE* forNode)
 {
+    AST_NODE *assign_expr_list1 = forNode->child;
+    AST_NODE *relop_expr_list = assign_expr_list1->rightSibling;
+    AST_NODE *assign_expr_list2 = relop_expr_list->rightSibling;
+    AST_NODE *stmt = assign_expr_list2->rightSibling;
+
+    AST_NODE *tmp;
+    for(tmp = assign_expr_list1->child; tmp != NULL; tmp = tmp->rightSibling){
+        checkAssignOrExpr(tmp);
+        if(tmp->nodeType == ERROR_TYPE)     assign_expr_list1->nodeType = ERROR_TYPE;
+    }
+    for(tmp = relop_expr_list->child; tmp != NULL; tmp = tmp->rightSibling){
+        DATA_TYPE catch = processRelopExpr(tmp);
+        if(tmp->nodeType == ERROR_TYPE)     relop_expr_list->nodeType = ERROR_TYPE;
+    }
+    for(tmp = assign_expr_list2->child; tmp != NULL; tmp = tmp->rightSibling){
+        checkAssignOrExpr(tmp);
+        if(tmp->nodeType == ERROR_TYPE)     assign_expr_list2->nodeType = ERROR_TYPE;
+    }
+    processStmtNode(stmt);
+
+    if(assign_expr_list1->nodeType == ERROR_TYPE || relop_expr_list->nodeType == ERROR_TYPE 
+        || assign_expr_list2->nodeType == ERROR_TYPE || stmt->nodeType == ERROR_TYPE )
+    {
+        forNode->nodeType = ERROR_TYPE;
+    }
 }
 
 
 void checkAssignmentStmt(AST_NODE* assignmentNode)
 {
+    AST_NODE *var_ref = assignmentNode->child;
+    AST_NODE *relop_expr = var_ref->rightSibling;
+    
+    //check for the left data type and right data type
+    DATA_TYPE dataType_left = processVariableLValue(var_ref);
+    DATA_TYPE dataType_right = processRelopExpr(relop_expr);
+
+    bool c1 = (dataType_left == ERROR_TYPE || dataType_right == ERROR_TYPE);                // one side is illegal
+    bool c2 = (dataType_left == CONST_STRING_TYPE || dataType_right == CONST_STRING_TYPE);  // string operation
+    bool c3 = (dataType_right == INT_PTR_TYPE || dataType_right == FLOAT_PTR_TYPE);         // pointer assigment
+
+    if(c1){
+        assignmentNode->nodeType = ERROR_TYPE;
+    }else if(c2){
+        assignmentNode->nodeType = ERROR_TYPE;
+        printErrorMsg(assignmentNode, STRING_OPERATION);
+    }else if(c3){
+        assignmentNode->nodeType = ERROR_TYPE;
+        printErrorMsg(assignmentNode, INCOMPATIBLE_ARRAY_DIMENSION);
+    }else{
+        assignmentNode->nodeType = getBiggerType(dataType_left, dataType_right);
+    }
 }
 
 
 void checkIfStmt(AST_NODE* ifNode)
 {
+    AST_NODE *test = ifNode->child;
+    AST_NODE *stmt1 = test->rightSibling;
+    AST_NODE *stmt2 = stmt1->rightSibling;  // It will be null node but not a null pointer if no else statement.
+    checkAssignOrExpr(test);
+    processStmtNode(stmt1);
+    processStmtNode(stmt2);
+
+    if(test->nodeType == ERROR_TYPE || stmt1->nodeType == ERROR_TYPE || stmt2->nodeType == ERROR_TYPE){
+        ifNode->nodeType = ERROR_TYPE;
+    }
 }
 
-void checkWriteFunction(AST_NODE* functionCallNode)
+// Check the match between actual return and declaration
+void checkReturnStmt(AST_NODE* returnNode)
 {
+    AST_NODE *relop_expr = returnNode->child;   //return "null node" or "relop_expr node"    
+    DATA_TYPE type_declaration, type_return;
+
+    // 1. Get the type of type_declaration
+    AST_NODE *tmp;
+    for (tmp = returnNode->parent; tmp != NULL; tmp = tmp->parent) {
+        if( tmp->nodeType == DECLARATION_NODE &&
+            tmp->semantic_value.declSemanticValue.kind == FUNCTION_DECL){
+            
+            // get attribute of function declaration in symbol table
+            SymbolTableEntry* symbol = retrieveSymbol(tmp->child->rightSibling->semantic_value.identifierSemanticValue.identifierName, 
+                                                        /*onlyInCurrentScope*/false);   // maybe false ?
+            SymbolAttribute* attribute = symbol->attribute;
+
+            type_declaration = attribute->attr.functionSignature->returnType;
+            
+            break;
+        }
+    }
+
+    // 2. Get the type of type_return
+    if(relop_expr->nodeType == NUL_NODE){       // return "null node"
+        if(type_declaration != VOID_TYPE){
+            printErrorMsg(returnNode, RETURN_TYPE_UNMATCH);
+            return;
+        }
+    }
+    type_return = processRelopExpr(relop_expr); // return "relop_expr" 
+    
+    bool c1 = (type_declaration == type_return);                            //match
+    bool c2 = (type_declaration == INT_TYPE && type_return == FLOAT_TYPE);  //conversion
+    bool c3 = (type_declaration == FLOAT_TYPE && type_return == INT_TYPE);  //conversion
+    if(!c1 && ~c2 && !c3){
+        printErrorMsg(returnNode, RETURN_TYPE_UNMATCH);
+    }
 }
 
-void checkFunctionCall(AST_NODE* functionCallNode) {
+
+/*
+ *  1.Generally, only check for the function name and parameter passing.
+ *  2.Lazy checking:
+ *      Should we check the return type not to be void  ->  we don't check
+ */
+void checkFunctionCall(AST_NODE* functionCallNode)
+{
     AST_NODE* functionName = functionCallNode->child;
     AST_NODE* paramList = functionName->rightSibling;
 
@@ -759,10 +754,20 @@ void checkFunctionCall(AST_NODE* functionCallNode) {
     if (function == NULL) {
         printErrorMsgSpecial(functionCallNode, functionName->semantic_value.identifierSemanticValue.identifierName,
                                 SYMBOL_UNDECLARED);
+        functionCallNode->nodeType = ERROR_TYPE;
         return;
+    }else if(function->attribute->attributeKind != FUNCTION_SIGNATURE){
+        printErrorMsgSpecial(functionCallNode, functionName->semantic_value.identifierSemanticValue.identifierName,
+                                NOT_FUNCTION_NAME);
+        functionCallNode->nodeType = ERROR_TYPE;
+        return;
+    }else{
+        checkParameterPassing(paramList, function->attribute->attr.functionSignature->parameterList, function->name);
+        functionCallNode->nodeType = function->attribute->attr.functionSignature->returnType;        // fixed
     }
-    checkParameterPassing(paramList, function->attribute->attr.functionSignature->parameterList, function->name);
 }
+// ----------   6 check statment    END --------------
+
 
 void checkParameterPassing(AST_NODE* passedParameter, Parameter* expectParam, char* name) {
     DATA_TYPE paramType;
@@ -801,7 +806,21 @@ void checkParameterPassing(AST_NODE* passedParameter, Parameter* expectParam, ch
                     break;
             }
             if (translatedType != expectParam->type->kind) {
-                printErrorMsg(param, PARAMETER_TYPE_UNMATCH);
+                //printErrorMsg(param, PARAMETER_TYPE_UNMATCH);                     I change it.
+                if(translatedType = SCALAR_TYPE_DESCRIPTOR && expectParam->type->kind == ARRAY_TYPE_DESCRIPTOR)
+                {
+                    printErrorMsgSpecial2(param->linenumber, 
+                                          param->semantic_value.identifierSemanticValue.identifierName, 
+                                          expectParam->parameterName, 
+                                          PASS_ARRAY_TO_SCALAR);
+                }
+                else if(translatedType = ARRAY_TYPE_DESCRIPTOR && expectParam->type->kind == SCALAR_TYPE_DESCRIPTOR)
+                {
+                    printErrorMsgSpecial2(param->linenumber,
+                                          param->semantic_value.identifierSemanticValue.identifierName,
+                                          expectParam->parameterName, 
+                                          PASS_SCALAR_TO_ARRAY);
+                }
             }
             param = param->rightSibling;
         }
@@ -818,7 +837,7 @@ void checkParameterPassing(AST_NODE* passedParameter, Parameter* expectParam, ch
 
 }
 
-
+// Maybe we don't need the following 2 functions ? 
 void getExprOrConstValue(AST_NODE* exprOrConstNode, int* iValue, float* fValue)
 {
 }
@@ -827,45 +846,322 @@ void evaluateExprValue(AST_NODE* exprNode)
 {
 }
 
-
+/*
+ * The subtree is data, or uniry/binary operation of data.
+ * We need to check whether the data type is consistent
+ *      1. no void type
+ *      2. no string type
+ *      3. no pointer type
+ * We should propagate error type.
+ */
 void processExprNode(AST_NODE* exprNode)
 {
+    DATA_TYPE dataType1, dataType2;
+    switch (exprNode->semantic_value.exprSemanticValue.kind) {
+        case BINARY_OPERATION:
+            dataType1 = processRelopExpr(exprNode->child);
+            dataType2 = processRelopExpr(exprNode->child->rightSibling);
+            if (dataType1 == VOID_TYPE || dataType2 == VOID_TYPE) {                     // void
+                printErrorMsg(exprNode, VOID_OPERATION);
+                exprNode->dataType = ERROR_TYPE;
+                return;
+            }
+            if (dataType1 == CONST_STRING_TYPE || dataType2 == CONST_STRING_TYPE ) {    // constant string
+                printErrorMsg(exprNode, STRING_OPERATION);
+                exprNode->dataType = ERROR_TYPE;
+                return;
+            }
+            if (dataType1 == INT_PTR_TYPE || dataType1 == FLOAT_PTR_TYPE 
+                        || dataType2 == INT_PTR_TYPE || dataType2 == FLOAT_PTR_TYPE) {  // pointer
+                printErrorMsg(exprNode, INCOMPATIBLE_ARRAY_DIMENSION);
+                exprNode->dataType = ERROR_TYPE;
+                return;
+            }
+            if (dataType1 == ERROR_TYPE || dataType1 == NONE_TYPE                       // error, none
+                        || dataType2 == ERROR_TYPE || dataType2 == NONE_TYPE) {
+                exprNode->dataType = ERROR_TYPE;
+                return;
+            }
+
+            exprNode->dataType = getBiggerType(dataType1, dataType2);                   // all is well
+            return;
+        case UNARY_OPERATION:
+            /**
+            * there are only two kinds of unary operation : "!" and "-"
+            * we allowed "!" on string constant and it will return INT_TYPE    <--   I discard this implemntation due to not meaningful enough.
+            */
+            dataType1 = processRelopExpr(exprNode->child);
+            switch (dataType1) {
+                case VOID_TYPE:                                                         // void
+                    printErrorMsg(exprNode, VOID_OPERATION);
+                    exprNode->dataType = ERROR_TYPE;
+                    return;
+                case CONST_STRING_TYPE:                                                 // constant string
+                    printErrorMsg(exprNode, STRING_OPERATION);
+                    exprNode->dataType = ERROR_TYPE;
+                    return;
+                case INT_PTR_TYPE:                                                      // pointer
+                case FLOAT_PTR_TYPE:
+                    printErrorMsg(exprNode, INCOMPATIBLE_ARRAY_DIMENSION);
+                    exprNode->dataType = ERROR_TYPE;
+                    return;
+                case INT_TYPE:                                                          // int
+                    exprNode->dataType = INT_TYPE;
+                    break;
+                case FLOAT_TYPE:                                                        // float
+                    exprNode->dataType = FLOAT_TYPE;
+                    break;
+                default:                                                                // error
+                    exprNode->dataType = ERROR_TYPE;
+                    break;
+            }
+
+        default:
+            fprintf(stderr, "[PARSER ERROR] no such type of expr\n");
+            exit(255);
+    }
 }
 
-
-void processVariableLValue(AST_NODE* idNode)
+/**
+ *  The following 2 functions handle the id in the LHS and RHS respectively, roughly the same.
+ *      1. Check whether it is declared before.
+ *      2.  (a) if it is function pointer, print error
+ *          (b) if it is a type, print error             // added
+ *          (c) otherwise if it is scalar, return it
+ *          (d) otherwise we check if it is an array slice
+ *  Roughly Speaking
+ *      processVariableLValue <------- processRelopExpr
+ *      processRelopExpr:
+ *          processConstValueNode(variable);
+ *          processExprNode(variable);
+ *          processVariableRValue(variable);
+ *          checkFunctionCall(variable);
+ *  The main difference between them is how to deal with the pointer.
+ */
+DATA_TYPE processVariableLValue(AST_NODE* idNode)
 {
+    SymbolTableEntry *symbol = retrieveSymbol(idNode->semantic_value.identifierSemanticValue.identifierName, 
+                                /*onlyInCurrentScope*/false);
+    if (symbol == NULL) {
+        printErrorMsgSpecial(idNode, idNode->semantic_value.identifierSemanticValue.identifierName,
+                            SYMBOL_UNDECLARED);
+        idNode->dataType = ERROR_TYPE;
+        return ERROR_TYPE;
+    }
+
+
+
+    if (symbol->attribute->attributeKind == FUNCTION_SIGNATURE) {
+        printErrorMsgSpecial(idNode, symbol->name, IS_FUNCTION_NOT_VARIABLE);
+        idNode->dataType = ERROR_TYPE;
+        return ERROR_TYPE;
+    }
+    else if (symbol->attribute->attributeKind == TYPE_ATTRIBUTE){
+        printErrorMsgSpecial(idNode, symbol->name, IS_TYPE_NOT_VARIABLE);
+        idNode->dataType = ERROR_TYPE;
+        return ERROR_TYPE;
+    }
+    else if (symbol->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR) {
+        /* actually, we should check whether idnode use it as an array, but too lazy */
+        idNode->dataType = symbol->attribute->attr.typeDescriptor->properties.dataType;
+    }
+    else {
+        int indexCount = 0;
+        int maxIndexCount = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.dimension;
+        DATA_TYPE indexType;
+        AST_NODE* index = idNode->child;
+        while (index != NULL) {
+            ++indexCount;
+            indexType = processRelopExpr(index);
+            if (indexType != INT_TYPE) {
+                printErrorMsg(index, ARRAY_SUBSCRIPT_NOT_INT);
+            }
+            index = index->rightSibling;
+        }
+        if (indexCount < maxIndexCount) {
+            // not allowed pointer in the LHS of assign, since we don't know how to handle
+            printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION);
+            idNode->dataType = ERROR_TYPE;
+            return ERROR_TYPE;
+        }
+        else if (indexCount == maxIndexCount) {
+            idNode->dataType = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType;// fixed
+        }
+        else {
+            printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION);
+            idNode->dataType = ERROR_TYPE;
+            return ERROR_TYPE;
+        }
+    }
+
 }
 
 void processVariableRValue(AST_NODE* idNode)
 {
+    SymbolTableEntry *symbol = retrieveSymbol(idNode->semantic_value.identifierSemanticValue.identifierName, 
+                                /*onlyInCurrentScope*/false);
+    if (symbol == NULL) {
+        printErrorMsgSpecial(idNode, idNode->semantic_value.identifierSemanticValue.identifierName,
+                            SYMBOL_UNDECLARED);
+        idNode->dataType = ERROR_TYPE;
+        return;
+    }
+ 
+
+    if (symbol->attribute->attributeKind == FUNCTION_SIGNATURE) {
+        printErrorMsgSpecial(idNode, symbol->name, IS_FUNCTION_NOT_VARIABLE);
+        idNode->dataType = ERROR_TYPE;
+        return;
+    }
+    else if (symbol->attribute->attributeKind == TYPE_ATTRIBUTE){
+        printErrorMsgSpecial(idNode, symbol->name, IS_TYPE_NOT_VARIABLE);
+        idNode->dataType = ERROR_TYPE;
+        return;
+    }
+    else if (symbol->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR) {
+        /* actually, we should check whether idnode use it as an array, but too lazy */
+        idNode->dataType = symbol->attribute->attr.typeDescriptor->properties.dataType;
+    }
+    else {
+        int indexCount = 0;
+        int maxIndexCount = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.dimension;
+        DATA_TYPE indexType;
+        AST_NODE* index = idNode->child;
+        while (index != NULL) {
+            ++indexCount;
+            indexType = processRelopExpr(index);
+            if (indexType != INT_TYPE) {
+                printErrorMsg(index, ARRAY_SUBSCRIPT_NOT_INT);
+            }
+            index = index->rightSibling;
+        }
+        if (indexCount < maxIndexCount) {
+            if (symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType == INT_TYPE){  // fixed
+                idNode->dataType = INT_PTR_TYPE;
+            }else{
+                idNode->dataType = FLOAT_PTR_TYPE;
+            }
+        }
+        else if (indexCount == maxIndexCount) {
+            idNode->dataType = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType;// fixed
+        }
+        else {
+            printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION);
+            idNode->dataType = ERROR_TYPE;
+            return;
+        }
+    }
 }
+
+
 
 
 void processConstValueNode(AST_NODE* constValueNode)
 {
+    // guarantee constValueNode->nodeType == CONST_VALUE_NODE
+    switch (constValueNode->semantic_value.const1->const_type) {
+        case INTEGERC:
+            constValueNode->dataType = INT_TYPE;
+            return;
+        case FLOATC:
+            constValueNode->dataType = FLOAT_TYPE;
+            return;
+        case STRINGC:
+            constValueNode->dataType = CONST_STRING_TYPE;
+            return;
+        default:
+            fprintf(stderr, "[PARSER ERROR] no such constant type\n");
+            constValueNode->dataType = ERROR_TYPE;
+            exit(255);
+    }
 }
 
-
-void checkReturnStmt(AST_NODE* returnNode)
+// what's this ? previous homework with read/write ? 
+void checkWriteFunction(AST_NODE* functionCallNode)
 {
 }
 
-
+/*
+ * In parser.y,     block : decl_list stmt_list 
+ */
 void processBlockNode(AST_NODE* blockNode)
 {
+    openScope();
+    AST_NODE *nodeptr, *tmp;
+    for(nodeptr = blockNode->child; nodeptr != NULL; nodeptr = nodeptr -> rightSibling){// 2 loops at most actually
+        switch(nodeptr->nodeType) {
+            case VARIABLE_DECL_LIST_NODE:                           // decl_list
+                for (tmp = nodeptr->child; tmp != NULL; tmp = tmp->rightSibling) {
+                    processDeclarationNode(tmp);
+                }
+                break;
+            case STMT_LIST_NODE:                                    // stmt_list
+                for (tmp = nodeptr->child; tmp != NULL; tmp = tmp->rightSibling) {
+                    processStmtNode(tmp);
+                }
+                break;
+            default:
+                fprintf(stderr, "[PARSER ERROR] void processBlockNode(AST_NODE* blockNode).\n");
+                blockNode->dataType = ERROR_TYPE;
+                exit(255);
+        }
+    }
+    closeScope();
 }
 
-
+/*
+ * Due to the overlapping, only need to divide the work to other functions.
+ * In parser.y, there are 10 kinds of stmtNode, (2 return, 2 if) --> 8 types.
+ */
 void processStmtNode(AST_NODE* stmtNode)
 {
+    if(stmtNode->nodeType == BLOCK_NODE){
+        processBlockNode(stmtNode);
+    }else if(stmtNode->nodeType == NUL_NODE){
+        return;
+    }else if(stmtNode->nodeType == STMT_NODE){
+        STMT_KIND kind = stmtNode->semantic_value.stmtSemanticValue.kind;
+        switch(kind){
+            case WHILE_STMT:
+                checkWhileStmt(stmtNode);
+                break;
+            case FOR_STMT:
+                checkForStmt(stmtNode);
+                break;
+            case ASSIGN_STMT:
+                checkAssignmentStmt(stmtNode);
+                break;
+            case FUNCTION_CALL_STMT:
+                checkFunctionCall(stmtNode);
+                break;
+            case IF_STMT:
+                checkIfStmt(stmtNode);
+                break;
+            case RETURN_STMT:
+                checkReturnStmt(stmtNode);
+                break;
+            default:
+                fprintf(stderr, "[PARSER ERROR] void processStmtNode(AST_NODE* stmtNode).\n");
+                stmtNode->dataType = ERROR_TYPE;
+                exit(255);
+        }
+    }else{
+        fprintf(stderr, "[PARSER ERROR] void processStmtNode(AST_NODE* stmtNode).\n");
+        stmtNode->dataType = ERROR_TYPE;
+        exit(255);
+    }
 }
 
-
+/* 
+ *  Put something here  ? ? 
+ */
 void processGeneralNode(AST_NODE *node)
 {
 }
 
+/*
+ * used by jason ?
+ */
 void processDeclDimList(AST_NODE* idNode, TypeDescriptor* typeDescriptor, int ignoreFirstDimSize)
 {
 }
