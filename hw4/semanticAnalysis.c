@@ -182,10 +182,16 @@ void semanticAnalysis(AST_NODE *root)
  * May be called from declaration, or statement.
  */
 DATA_TYPE processRelopExpr(AST_NODE* variable) {
-    if(variable->nodeType == EXPR_NODE)             processExprNode(variable);          // INT_TYPE / FLOAT_TYPE
-    else if(variable->nodeType == STMT_NODE)        checkFunctionCall(variable);        // INT_TYPE / FLOAT_TYPE / VOID_TYPE
-    else if(variable->nodeType == IDENTIFIER_NODE)  processVariableRValue(variable);    // INT_TYPE / FLOAT_TYPE / INT_PTR_TYPE / FLOAT_PTR_TYPE
-    else if(variable->nodeType == CONST_VALUE_NODE) processConstValueNode(variable);    // INT_TYPE / FLOAT_TYPE / CONST_STRING_TYPE;
+    if (variable->nodeType == EXPR_NODE) {					// INT_TYPE / FLOAT_TYPE
+    	processExprNode(variable);
+    } else if (variable->nodeType == STMT_NODE) {			// INT_TYPE / FLOAT_TYPE / VOID_TYPE
+    	checkFunctionCall(variable);        
+    } else if (variable->nodeType == IDENTIFIER_NODE) {		// INT_TYPE / FLOAT_TYPE / INT_PTR_TYPE / FLOAT_PTR_TYPE
+    	processVariableRValue(variable);    
+    } else if (variable->nodeType == CONST_VALUE_NODE) {	// INT_TYPE / FLOAT_TYPE / CONST_STRING_TYPE;
+    	processConstValueNode(variable);    
+    }
+    //fprintf(stderr, "--- mark %d\n", variable->dataType);
     return variable->dataType;
 }
 
@@ -604,12 +610,10 @@ void declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray, 
 
 
 void checkAssignOrExpr(AST_NODE* assignOrExprRelatedNode) {
-    if(assignOrExprRelatedNode->nodeType == STMT_NODE)      // Assign Statement
-    {
+    if (assignOrExprRelatedNode->nodeType == STMT_NODE)  {	// Assign Statement
         checkAssignmentStmt(assignOrExprRelatedNode);
     }
-    else                                                    // Relop Expression ( data type cannot stated by if statement)
-    {
+    else {													// Relop Expression ( data type cannot stated by if statement)
         DATA_TYPE catch = processRelopExpr(assignOrExprRelatedNode);
     }
 }
@@ -627,7 +631,7 @@ void checkWhileStmt(AST_NODE* whileNode)
     checkAssignOrExpr(test);
     processStmtNode(stmt);
 
-    if(test->nodeType == ERROR_TYPE || stmt->nodeType == ERROR_TYPE){
+    if (test->nodeType == ERROR_TYPE || stmt->nodeType == ERROR_TYPE) {
         whileNode->nodeType = ERROR_TYPE;
     }
 }
@@ -641,22 +645,22 @@ void checkForStmt(AST_NODE* forNode)
     AST_NODE *stmt = assign_expr_list2->rightSibling;
 
     AST_NODE *tmp;
-    for(tmp = assign_expr_list1->child; tmp != NULL; tmp = tmp->rightSibling){
+    for (tmp = assign_expr_list1->child; tmp != NULL; tmp = tmp->rightSibling) {
         checkAssignOrExpr(tmp);
         if(tmp->nodeType == ERROR_TYPE)     assign_expr_list1->nodeType = ERROR_TYPE;
     }
-    for(tmp = relop_expr_list->child; tmp != NULL; tmp = tmp->rightSibling){
+    for (tmp = relop_expr_list->child; tmp != NULL; tmp = tmp->rightSibling) {
         DATA_TYPE catch = processRelopExpr(tmp);
         if(tmp->nodeType == ERROR_TYPE)     relop_expr_list->nodeType = ERROR_TYPE;
     }
-    for(tmp = assign_expr_list2->child; tmp != NULL; tmp = tmp->rightSibling){
+    for (tmp = assign_expr_list2->child; tmp != NULL; tmp = tmp->rightSibling) {
         checkAssignOrExpr(tmp);
         if(tmp->nodeType == ERROR_TYPE)     assign_expr_list2->nodeType = ERROR_TYPE;
     }
     processStmtNode(stmt);
 
-    if(assign_expr_list1->nodeType == ERROR_TYPE || relop_expr_list->nodeType == ERROR_TYPE 
-        || assign_expr_list2->nodeType == ERROR_TYPE || stmt->nodeType == ERROR_TYPE )
+    if (assign_expr_list1->nodeType == ERROR_TYPE || relop_expr_list->nodeType == ERROR_TYPE 
+        || assign_expr_list2->nodeType == ERROR_TYPE || stmt->nodeType == ERROR_TYPE ) 
     {
         forNode->nodeType = ERROR_TYPE;
     }
@@ -676,15 +680,18 @@ void checkAssignmentStmt(AST_NODE* assignmentNode)
     bool c2 = (dataType_left == CONST_STRING_TYPE || dataType_right == CONST_STRING_TYPE);  // string operation
     bool c3 = (dataType_right == INT_PTR_TYPE || dataType_right == FLOAT_PTR_TYPE);         // pointer assigment
 
-    if(c1){
+    if (c1) {
         assignmentNode->nodeType = ERROR_TYPE;
-    }else if(c2){
+    }
+    else if (c2) {
         assignmentNode->nodeType = ERROR_TYPE;
         printErrorMsg(assignmentNode, STRING_OPERATION);
-    }else if(c3){
+    }
+    else if (c3) {
         assignmentNode->nodeType = ERROR_TYPE;
         printErrorMsg(assignmentNode, INCOMPATIBLE_ARRAY_DIMENSION);
-    }else{
+    }
+    else {
         assignmentNode->nodeType = getBiggerType(dataType_left, dataType_right);
     }
 }
@@ -699,7 +706,7 @@ void checkIfStmt(AST_NODE* ifNode)
     processStmtNode(stmt1);
     processStmtNode(stmt2);
 
-    if(test->nodeType == ERROR_TYPE || stmt1->nodeType == ERROR_TYPE || stmt2->nodeType == ERROR_TYPE){
+    if (test->nodeType == ERROR_TYPE || stmt1->nodeType == ERROR_TYPE || stmt2->nodeType == ERROR_TYPE) {
         ifNode->nodeType = ERROR_TYPE;
     }
 }
@@ -716,12 +723,34 @@ void checkReturnStmt(AST_NODE* returnNode)
         if( tmp->nodeType == DECLARATION_NODE &&
             tmp->semantic_value.declSemanticValue.kind == FUNCTION_DECL){
             
-            // get attribute of function declaration in symbol table
-            SymbolTableEntry* symbol = retrieveSymbol(tmp->child->rightSibling->semantic_value.identifierSemanticValue.identifierName, 
-                                                        /*onlyInCurrentScope*/false);   // maybe false ?
-            SymbolAttribute* attribute = symbol->attribute;
+            // can't get attribute of function declaration in symbol table
+            // since may the same name may be declared into variable in the function.
+    		
+    		AST_NODE *returnTypeNode = tmp->child;
+    		char returnTypeNodeName[100];
+    		strcpy(returnTypeNodeName, returnTypeNode->semantic_value.identifierSemanticValue.identifierName);
 
-            type_declaration = attribute->attr.functionSignature->returnType;
+    		if ( strcmp(returnTypeNodeName,"void")==0 ) {
+    			type_declaration = VOID_TYPE;
+    		}
+    		else if ( strcmp(returnTypeNodeName,"int")==0 ) {
+    			type_declaration = INT_TYPE;
+    		}
+    		else if ( strcmp(returnTypeNodeName,"float")==0 ) {
+    			type_declaration = FLOAT_TYPE;
+    		}
+    		else {		//"type" f(int a, int b){}    or ERROR
+    			SymbolTableEntry* symbol = retrieveSymbol(returnTypeNodeName, /*onlyInCurrentScope*/false);
+    			if (symbol == NULL) {
+    				type_declaration = ERROR_TYPE;
+    			} 
+    			else if (symbol->attribute->attributeKind != TYPE_ATTRIBUTE) {
+    				type_declaration = ERROR_TYPE;
+    			}
+    			else {
+    				type_declaration = symbol->attribute->attr.typeDescriptor->properties.dataType;
+    			}
+    		}		
             
             break;
         }
@@ -731,15 +760,18 @@ void checkReturnStmt(AST_NODE* returnNode)
     if(relop_expr->nodeType == NUL_NODE){       // return "null node"
         if(type_declaration != VOID_TYPE){
             printErrorMsg(returnNode, RETURN_TYPE_UNMATCH);
-            return;
         }
+        return;
     }
     type_return = processRelopExpr(relop_expr); // return "relop_expr" 
     
     bool c1 = (type_declaration == type_return);                            //match
     bool c2 = (type_declaration == INT_TYPE && type_return == FLOAT_TYPE);  //conversion
     bool c3 = (type_declaration == FLOAT_TYPE && type_return == INT_TYPE);  //conversion
-    if(!c1 && ~c2 && !c3){
+    
+	//fprintf(stderr, "type_declaration : %d, type_return : %d\n", type_declaration,type_return);
+    
+    if (!c1 && ~c2 && !c3) {
         printErrorMsg(returnNode, RETURN_TYPE_UNMATCH);
     }
 }
@@ -763,14 +795,17 @@ void checkFunctionCall(AST_NODE* functionCallNode)
                                 SYMBOL_UNDECLARED);
         functionCallNode->nodeType = ERROR_TYPE;
         return;
-    }else if(function->attribute->attributeKind != FUNCTION_SIGNATURE){
+    }
+    else if (function->attribute->attributeKind != FUNCTION_SIGNATURE) {
         printErrorMsgSpecial(functionCallNode, functionName->semantic_value.identifierSemanticValue.identifierName,
                                 NOT_FUNCTION_NAME);
         functionCallNode->nodeType = ERROR_TYPE;
         return;
-    }else{
+    }
+    else {
         checkParameterPassing(paramList, function->attribute->attr.functionSignature->parameterList, function->name);
-        functionCallNode->nodeType = function->attribute->attr.functionSignature->returnType;        // fixed
+        functionCallNode->dataType = function->attribute->attr.functionSignature->returnType;        // fixed
+        //fprintf(stderr, "mark %d\n", function->attribute->attr.functionSignature->returnType);
     }
 }
 // ----------   6 check statment    END --------------
