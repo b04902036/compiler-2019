@@ -110,6 +110,7 @@ void printErrorMsgSpecial(AST_NODE* node1, char* name2, ErrorMsgKind errorMsgKin
             break;
         case IS_FUNCTION_NOT_VARIABLE:
             printf("symbol %s is function, not variable\n", name2);
+            break;
         case TOO_FEW_ARGUMENTS:
             printf("too few arguments to function %s\n", name2);
             break;
@@ -124,6 +125,9 @@ void printErrorMsgSpecial(AST_NODE* node1, char* name2, ErrorMsgKind errorMsgKin
             break;
         case IS_TYPE_NOT_VARIABLE:
             printf("%s is a type, not a varable\n", name2);
+            break;
+        case NOT_ARRAY:
+            printf("%s is not an array\n", name2);
             break;
         default:
             printf("Unhandled case in void printErrorMsgSpecial(AST_NODE* node, ERROR_MSG_KIND* %d)\n", errorMsgKind);
@@ -666,7 +670,6 @@ void checkForStmt(AST_NODE* forNode)
     }
 }
 
-
 void checkAssignmentStmt(AST_NODE* assignmentNode)
 {
     AST_NODE *var_ref = assignmentNode->child;
@@ -675,7 +678,7 @@ void checkAssignmentStmt(AST_NODE* assignmentNode)
     //check for the left data type and right data type
     DATA_TYPE dataType_left = processVariableLValue(var_ref);
     DATA_TYPE dataType_right = processRelopExpr(relop_expr);
-
+    
     bool c1 = (dataType_left == ERROR_TYPE || dataType_right == ERROR_TYPE);                // one side is illegal
     bool c2 = (dataType_left == CONST_STRING_TYPE || dataType_right == CONST_STRING_TYPE);  // string operation
     bool c3 = (dataType_right == INT_PTR_TYPE || dataType_right == FLOAT_PTR_TYPE);         // pointer assigment
@@ -1031,7 +1034,7 @@ DATA_TYPE processVariableLValue(AST_NODE* idNode)
             return ERROR_TYPE;
         }
     }
-
+    return idNode->dataType;
 }
 
 void processVariableRValue(AST_NODE* idNode)
@@ -1057,8 +1060,14 @@ void processVariableRValue(AST_NODE* idNode)
         return;
     }
     else if (symbol->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR) {
-        /* actually, we should check whether idnode use it as an array, but too lazy */
-        idNode->dataType = symbol->attribute->attr.typeDescriptor->properties.dataType;
+        // check whether this node is referenced as array
+        if (idNode->semantic_value.identifierSemanticValue.kind == ARRAY_ID) {
+            printErrorMsgSpecial(idNode, symbol->name, NOT_ARRAY);
+            idNode->dataType = ERROR_TYPE;
+        }
+        else {
+            idNode->dataType = symbol->attribute->attr.typeDescriptor->properties.dataType;
+        }
     }
     else {
         int indexCount = 0;
