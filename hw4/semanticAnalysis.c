@@ -110,6 +110,7 @@ void printErrorMsgSpecial(AST_NODE* node1, char* name2, ErrorMsgKind errorMsgKin
             break;
         case IS_FUNCTION_NOT_VARIABLE:
             printf("symbol %s is function, not variable\n", name2);
+            break;
         case TOO_FEW_ARGUMENTS:
             printf("too few arguments to function %s\n", name2);
             break;
