@@ -666,7 +666,8 @@ void checkForStmt(AST_NODE* forNode)
     }
 }
 
-
+// FIXME:
+//  why didn't go in this function?
 void checkAssignmentStmt(AST_NODE* assignmentNode)
 {
     AST_NODE *var_ref = assignmentNode->child;
