@@ -416,7 +416,6 @@ void declareFunction(AST_NODE* declarationNode) {
 }
 
 void declareType(AST_NODE* typeNode) {
-    int idx = 0;
     DATA_TYPE type;
     AST_NODE* dataType = typeNode->child;
     
@@ -546,6 +545,7 @@ void declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray, 
                  *   1. NULL (e.g. int a[][10];) is not allowed when declaring
                  *   2. float (e.g. int a[10-0.3];) is not allowed when declaring
                  */
+                idx = 0;
                 for (AST_NODE* arrayDimension = variable->child;
                         arrayDimension != NULL; arrayDimension = arrayDimension->rightSibling, ++idx) {
                     if (arrayDimension->nodeType == NUL_NODE && 
