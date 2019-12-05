@@ -99,6 +99,9 @@ void printErrorMsgSpecial(AST_NODE* node1, char* name2, ErrorMsgKind errorMsgKin
     g_anyErrorOccur = 1;
     printf("Error found in line %d\n", node1->linenumber);
     switch(errorMsgKind) {
+        case NOT_ASSIGNABLE:
+            printf("assigned value not compatible with type of variable %s\n", name2);
+            break;
         case SYMBOL_IS_NOT_TYPE:
             printf("unknown type name %s\n", name2);
             break;
@@ -564,7 +567,10 @@ void declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray, 
             case WITH_INIT_ID:
                 symbol->attribute->attr.typeDescriptor->kind = SCALAR_TYPE_DESCRIPTOR;
                 symbol->attribute->attr.typeDescriptor->properties.dataType = type;
-                processRelopExpr(variable->child);
+                type = processRelopExpr(variable->child);
+                if (type != INT_TYPE && type != FLOAT_TYPE) {
+                    printErrorMsgSpecial(variable, symbol->name, NOT_ASSIGNABLE);
+                }
                 break;
             default:
                 fprintf(stderr, "[PARSER ERROR] no such kind of IdentifierSemanticValue\n");
@@ -632,8 +638,8 @@ void checkWhileStmt(AST_NODE* whileNode)
     checkAssignOrExpr(test);
     processStmtNode(stmt);
 
-    if (test->nodeType == ERROR_TYPE || stmt->nodeType == ERROR_TYPE) {
-        whileNode->nodeType = ERROR_TYPE;
+    if (test->dataType == ERROR_TYPE || stmt->dataType == ERROR_TYPE) {
+        whileNode->dataType = ERROR_TYPE;
     }
 }
 
@@ -648,22 +654,22 @@ void checkForStmt(AST_NODE* forNode)
     AST_NODE *tmp;
     for (tmp = assign_expr_list1->child; tmp != NULL; tmp = tmp->rightSibling) {
         checkAssignOrExpr(tmp);
-        if(tmp->nodeType == ERROR_TYPE)     assign_expr_list1->nodeType = ERROR_TYPE;
+        if(tmp->dataType == ERROR_TYPE)     assign_expr_list1->dataType = ERROR_TYPE;
     }
     for (tmp = relop_expr_list->child; tmp != NULL; tmp = tmp->rightSibling) {
         DATA_TYPE catch = processRelopExpr(tmp);
-        if(tmp->nodeType == ERROR_TYPE)     relop_expr_list->nodeType = ERROR_TYPE;
+        if(tmp->dataType == ERROR_TYPE)     relop_expr_list->dataType = ERROR_TYPE;
     }
     for (tmp = assign_expr_list2->child; tmp != NULL; tmp = tmp->rightSibling) {
         checkAssignOrExpr(tmp);
-        if(tmp->nodeType == ERROR_TYPE)     assign_expr_list2->nodeType = ERROR_TYPE;
+        if(tmp->dataType == ERROR_TYPE)     assign_expr_list2->dataType = ERROR_TYPE;
     }
     processStmtNode(stmt);
 
-    if (assign_expr_list1->nodeType == ERROR_TYPE || relop_expr_list->nodeType == ERROR_TYPE 
-        || assign_expr_list2->nodeType == ERROR_TYPE || stmt->nodeType == ERROR_TYPE ) 
+    if (assign_expr_list1->dataType == ERROR_TYPE || relop_expr_list->dataType == ERROR_TYPE 
+        || assign_expr_list2->dataType == ERROR_TYPE || stmt->dataType == ERROR_TYPE ) 
     {
-        forNode->nodeType = ERROR_TYPE;
+        forNode->dataType = ERROR_TYPE;
     }
 }
 
@@ -679,20 +685,25 @@ void checkAssignmentStmt(AST_NODE* assignmentNode)
     bool c1 = (dataType_left == ERROR_TYPE || dataType_right == ERROR_TYPE);                // one side is illegal
     bool c2 = (dataType_left == CONST_STRING_TYPE || dataType_right == CONST_STRING_TYPE);  // string operation
     bool c3 = (dataType_right == INT_PTR_TYPE || dataType_right == FLOAT_PTR_TYPE);         // pointer assigment
+    bool c4 = (dataType_left == VOID_TYPE || dataType_right == VOID_TYPE);
 
     if (c1) {
-        assignmentNode->nodeType = ERROR_TYPE;
+        assignmentNode->dataType = ERROR_TYPE;
     }
     else if (c2) {
-        assignmentNode->nodeType = ERROR_TYPE;
+        assignmentNode->dataType = ERROR_TYPE;
         printErrorMsg(assignmentNode, STRING_OPERATION);
     }
     else if (c3) {
-        assignmentNode->nodeType = ERROR_TYPE;
+        assignmentNode->dataType = ERROR_TYPE;
         printErrorMsg(assignmentNode, INCOMPATIBLE_ARRAY_DIMENSION);
     }
+    else if (c4) {
+        assignmentNode->dataType = ERROR_TYPE;
+        printErrorMsgSpecial(assignmentNode, var_ref->semantic_value.identifierSemanticValue.identifierName, NOT_ASSIGNABLE);
+    }
     else {
-        assignmentNode->nodeType = getBiggerType(dataType_left, dataType_right);
+        assignmentNode->dataType = getBiggerType(dataType_left, dataType_right);
     }
 }
 
@@ -706,8 +717,8 @@ void checkIfStmt(AST_NODE* ifNode)
     processStmtNode(stmt1);
     processStmtNode(stmt2);
 
-    if (test->nodeType == ERROR_TYPE || stmt1->nodeType == ERROR_TYPE || stmt2->nodeType == ERROR_TYPE) {
-        ifNode->nodeType = ERROR_TYPE;
+    if (test->dataType == ERROR_TYPE || stmt1->dataType == ERROR_TYPE || stmt2->dataType == ERROR_TYPE) {
+        ifNode->dataType = ERROR_TYPE;
     }
 }
 
