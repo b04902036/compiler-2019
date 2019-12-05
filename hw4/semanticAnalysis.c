@@ -1132,7 +1132,6 @@ void checkWriteFunction(AST_NODE* functionCallNode)
  */
 void processBlockNode(AST_NODE* blockNode)
 {
-    openScope();
     AST_NODE *nodeptr, *tmp;
     for(nodeptr = blockNode->child; nodeptr != NULL; nodeptr = nodeptr -> rightSibling){// 2 loops at most actually
         switch(nodeptr->nodeType) {
@@ -1152,7 +1151,6 @@ void processBlockNode(AST_NODE* blockNode)
                 exit(255);
         }
     }
-    closeScope();
 }
 
 /*
@@ -1162,7 +1160,9 @@ void processBlockNode(AST_NODE* blockNode)
 void processStmtNode(AST_NODE* stmtNode)
 {
     if(stmtNode->nodeType == BLOCK_NODE){
+        openScope();
         processBlockNode(stmtNode);
+        closeScope();
     }else if(stmtNode->nodeType == NUL_NODE){
         return;
     }else if(stmtNode->nodeType == STMT_NODE){
