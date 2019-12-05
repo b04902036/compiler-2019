@@ -161,9 +161,6 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) {
         case INCOMPATIBLE_ARRAY_DIMENSION:
             printf("Incompatible array dimensions.\n");
             break;
-        case PARAMETER_TYPE_UNMATCH:
-            printf("parameter passed to function type mismatch\n");
-            break;
         case RETURN_TYPE_UNMATCH:
             printf("Incompatible return type.\n");
             break;
@@ -781,9 +778,8 @@ void checkReturnStmt(AST_NODE* returnNode)
 
 
 /*
- *  1.Generally, only check for the function name and parameter passing.
- *  2.Lazy checking:
- *      Should we check the return type not to be void  ->  we don't check
+ *  1. check for the function name and parameter passing.
+ *  2. return type should not be void
  */
 void checkFunctionCall(AST_NODE* functionCallNode)
 {
@@ -796,13 +792,13 @@ void checkFunctionCall(AST_NODE* functionCallNode)
     if (function == NULL) {
         printErrorMsgSpecial(functionCallNode, functionName->semantic_value.identifierSemanticValue.identifierName,
                                 SYMBOL_UNDECLARED);
-        functionCallNode->nodeType = ERROR_TYPE;
+        functionCallNode->dataType = ERROR_TYPE;
         return;
     }
     else if (function->attribute->attributeKind != FUNCTION_SIGNATURE) {
         printErrorMsgSpecial(functionCallNode, functionName->semantic_value.identifierSemanticValue.identifierName,
                                 NOT_FUNCTION_NAME);
-        functionCallNode->nodeType = ERROR_TYPE;
+        functionCallNode->dataType = ERROR_TYPE;
         return;
     }
     else {
@@ -861,6 +857,9 @@ void checkParameterPassing(AST_NODE* passedParameter, Parameter* expectParam, ch
                                       param->semantic_value.identifierSemanticValue.identifierName,
                                       expectParam->parameterName, 
                                       PASS_ARRAY_TO_SCALAR);
+            }
+            else if (translatedType != expectParam->type->kind) {
+                printErrorMsgSpecial(param, name, PARAMETER_TYPE_UNMATCH);
             }
             param = param->rightSibling;
         }
