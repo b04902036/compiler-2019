@@ -772,9 +772,9 @@ void checkReturnStmt(AST_NODE* returnNode)
     bool c2 = (type_declaration == INT_TYPE && type_return == FLOAT_TYPE);  //conversion
     bool c3 = (type_declaration == FLOAT_TYPE && type_return == INT_TYPE);  //conversion
     
-	//fprintf(stderr, "type_declaration : %d, type_return : %d\n", type_declaration,type_return);
+	fprintf(stderr, "type_declaration : %d, type_return : %d\n", type_declaration,type_return);
     
-    if (!c1 && ~c2 && !c3) {
+    if (!c1 && !c2 && !c3) {
         printErrorMsg(returnNode, RETURN_TYPE_UNMATCH);
     }
 }
