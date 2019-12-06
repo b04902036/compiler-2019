@@ -568,7 +568,10 @@ void declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray, 
                 symbol->attribute->attr.typeDescriptor->kind = SCALAR_TYPE_DESCRIPTOR;
                 symbol->attribute->attr.typeDescriptor->properties.dataType = type;
                 type = processRelopExpr(variable->child);
-                if (type != INT_TYPE && type != FLOAT_TYPE) {
+                if (type == FLOAT_PTR_TYPE || type == INT_PTR_TYPE) {
+                    printErrorMsg(variable, INCOMPATIBLE_ARRAY_DIMENSION);
+                }
+                else if (type != INT_TYPE && type != FLOAT_TYPE) {
                     printErrorMsgSpecial(variable, symbol->name, NOT_ASSIGNABLE);
                 }
                 break;
@@ -681,7 +684,7 @@ void checkAssignmentStmt(AST_NODE* assignmentNode)
     //check for the left data type and right data type
     DATA_TYPE dataType_left = processVariableLValue(var_ref);
     DATA_TYPE dataType_right = processRelopExpr(relop_expr);
-    
+   
     bool c1 = (dataType_left == ERROR_TYPE || dataType_right == ERROR_TYPE);                // one side is illegal
     bool c2 = (dataType_left == CONST_STRING_TYPE || dataType_right == CONST_STRING_TYPE);  // string operation
     bool c3 = (dataType_right == INT_PTR_TYPE || dataType_right == FLOAT_PTR_TYPE);         // pointer assigment
