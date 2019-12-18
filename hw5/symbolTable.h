@@ -84,6 +84,10 @@ typedef struct SymbolTableEntry
     SymbolAttribute* attribute;
     int nestingLevel;
 
+	bool global;
+	int offset;
+	//int regnum;
+	//bool dirty;
 } SymbolTableEntry;
 
 typedef struct SymbolTable
@@ -91,13 +95,16 @@ typedef struct SymbolTable
     SymbolTableEntry*** hashTable;
     SymbolTableEntry*** totalScope;
     int currentLevel;
+	
+	int *open_order;
+	int very_total;
 	int scope_now;
 
     int allocatedHashTableCount;
     int totalHashTableCount;
 
     int allocatedTotalScopeCount;
-    int totalScopeCount;
+    //int totalScopeCount;
 } SymbolTable;
 
 

@@ -6,46 +6,65 @@
 
 FILE * FP;
 int constid = 0;
+int global_offset = 0;
+int frame_offset = 0;
+bool global_variable_declaration = true;
 
 int gencode(AST_NODE* node);
-void gencodeProgram(AST_NODE* node);
-void gencodeDeclarationNode(AST_NODE* declarationNode);
-void gencodedeclareFunction(AST_NODE* declarationNode);
-void gencodeBlockNode(AST_NODE* blockNode);
-void gencodeStmtNode(AST_NODE* stmtNode);
-void gencodeFunctionCall(AST_NODE* functionCallNode);
+void gencode_Program(AST_NODE* node);
+void gencode_DeclarationNode(AST_NODE* declarationNode);
+void gencode_declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray, Parameter* paramList);
+void gencode_declareType(AST_NODE* typeNode);
+void gencode_declareFunction(AST_NODE* declarationNode);
 
-void gencodeprologue(char *name);
-void gencodeepilogue(char *name);
-void gencoderead(AST_NODE* functionCallNode);
-void gencodefread(AST_NODE* functionCallNode);
-void gencodewrite(AST_NODE* functionCallNode);
+DATA_TYPE gencode_RelopExpr(AST_NODE* variable);
+void gencode_ExprNode(AST_NODE* exprNode);
+void gencode_VariableRValue(AST_NODE* idNode); 
+void gencode_ConstValueNode(AST_NODE* constValueNode);
+
+void gencode_BlockNode(AST_NODE* blockNode);
+void gencode_StmtNode(AST_NODE* stmtNode);
+void gencode_FunctionCall(AST_NODE* functionCallNode);
+
+void gencode_prologue(char *name);
+void gencode_epilogue(char *name);
+void gencode_read(AST_NODE* functionCallNode);
+void gencode_fread(AST_NODE* functionCallNode);
+void gencode_write(AST_NODE* functionCallNode);
 
 
 
 int gencode(AST_NODE* node){
-	FP = fopen("output.s", "w");
-	gencodeProgram(node);
-	fclose(FP);
-	return 0;
+    FP = fopen("output.s", "w");
+	
+    fprintf(FP, ".data\n");
+    fprintf(FP, "_endline: .ascii \"\\n\"\n");
+    fprintf(FP, ".align 3\n");
+	
+    gencode_Program(node);
+    fclose(FP);
+    return 0;
 }
 
-void gencodeProgram(AST_NODE* programNode){
+void gencode_Program(AST_NODE* programNode){
     AST_NODE* start = programNode->child;
     AST_NODE* tmp;
     
+    //fprintf(stderr, "+++\n");
     gencode_openScope();
 
     for (start = programNode->child; start != NULL; start = start->rightSibling) {
         switch (start->nodeType) {
             case DECLARATION_NODE:                  // function declaration
-				//fprintf(FP, ".text\n");
-                gencodeDeclarationNode(start);
+                //fprintf(FP, ".text\n");
+                global_variable_declaration = false;
+                gencode_DeclarationNode(start);
                 break;
             case VARIABLE_DECL_LIST_NODE:           // decl_list 
-				//fprintf(FP, ".data\n");
+                //fprintf(FP, ".data\n");
+                global_variable_declaration = true;
                 for (tmp = start->child; tmp != NULL; tmp = tmp->rightSibling) {
-                    gencodeDeclarationNode(tmp);
+                    gencode_DeclarationNode(tmp);
                 }
                 break;
             default:
@@ -56,56 +75,214 @@ void gencodeProgram(AST_NODE* programNode){
     gencode_closeScope();
 }
 
-void gencodeDeclarationNode(AST_NODE* declarationNode){
-	switch (declarationNode->semantic_value.declSemanticValue.kind) {
+DATA_TYPE gencode_RelopExpr(AST_NODE* variable) {
+    if (variable->nodeType == EXPR_NODE) {					// INT_TYPE / FLOAT_TYPE
+    	gencode_ExprNode(variable);
+    } else if (variable->nodeType == STMT_NODE) {			// INT_TYPE / FLOAT_TYPE / VOID_TYPE
+    	gencode_FunctionCall(variable);        
+    } else if (variable->nodeType == IDENTIFIER_NODE) {		// INT_TYPE / FLOAT_TYPE / INT_PTR_TYPE / FLOAT_PTR_TYPE
+    	gencode_VariableRValue(variable);    
+    } else if (variable->nodeType == CONST_VALUE_NODE) {	// INT_TYPE / FLOAT_TYPE / CONST_STRING_TYPE;
+    	gencode_ConstValueNode(variable);    
+    }
+    return variable->dataType;
+}
+
+void gencode_ExprNode(AST_NODE* exprNode){
+	
+}
+
+void gencode_VariableRValue(AST_NODE* idNode){
+	
+}
+
+void gencode_ConstValueNode(AST_NODE* constValueNode){
+	
+}
+
+void gencode_DeclarationNode(AST_NODE* declarationNode){
+    switch (declarationNode->semantic_value.declSemanticValue.kind) {
         case VARIABLE_DECL:                                 // int a, b, c[];
-            //declareIdList(declarationNode, false, NULL);
+            gencode_declareIdList(declarationNode, false, NULL);
             break;
         case TYPE_DECL:                                     // typedef int aaa
-            //declareType(declarationNode);
+            gencode_declareType(declarationNode);
             break;
         case FUNCTION_DECL:                                 // int f(int a, int b){}
-            gencodedeclareFunction(declarationNode);
+            gencode_declareFunction(declarationNode);
             break;
         default:
             fprintf(stderr, "no such DECL kind\n");
             exit(255);
     }
 }
-void gencodedeclareFunction(AST_NODE* declarationNode){
+void gencode_declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray, Parameter* paramList){
+    AST_NODE* dataType = declarationNode->child;
+    for (AST_NODE* variable = dataType->rightSibling; variable != NULL; variable = variable->rightSibling) {
+        SymbolTableEntry* symbol = gencode_retrieveSymbol(variable->semantic_value.identifierSemanticValue.identifierName,/*onlyInCurrentScope*/true);
+        if (symbol == NULL) {
+            fprintf(stderr, "no such symbol %s in symbol table\n",variable->semantic_value.identifierSemanticValue.identifierName);
+            exit(255);
+        }
+        
+        if (global_variable_declaration == true) { // global declaration
+            symbol->global = true;
+            symbol->offset = global_offset;
+            fprintf(FP, ".data\n");
+            
+            switch (variable->semantic_value.identifierSemanticValue.kind) {
+                case NORMAL_ID:
+                    if(symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE){
+                        fprintf(FP, "_g_%d:  .word 0\n",global_offset++);
+                    } else {
+                        fprintf(FP, "_g_%d:  .float 0\n",global_offset++);
+                    }
+                    break;
+                case WITH_INIT_ID:  // !!! We only handle constant initializations "int a = 3;"
+                    if(symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE){
+                        fprintf(FP, "_g_%d:  .word %d\n",global_offset++, variable->child->semantic_value.const1->const_u.intval);
+                    } else {
+                        fprintf(FP, "_g_%d:  .float %f\n",global_offset++, variable->child->semantic_value.const1->const_u.fval);
+                    }
+                    break;
+                case ARRAY_ID:      // too compilcated for me QAQ
+                    //symbol->attribute->attr.typeDescriptor->kind = ARRAY_TYPE_DESCRIPTOR;
+                    //symbol->attribute->attr.typeDescriptor->properties.arrayProperties.dimension = idx;
+                    //symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType = type;
+                    
+                    break;
+                default:
+                    fprintf(stderr, "[PARSER ERROR] no such kind of IdentifierSemanticValue\n");
+            }
+        }else{  // local declaration
+            symbol->global = false;
+            symbol->offset = frame_offset;
+            
+            switch (variable->semantic_value.identifierSemanticValue.kind) {
+                case NORMAL_ID:
+                    if(symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE){
+
+                    } else {
+
+                    }
+					frame_offset += 8;
+                    break;
+                case WITH_INIT_ID:
+                    if(symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE){
+						fprintf(FP, ".data\n");
+						fprintf(FP, "_CONSTANT_%d: .word %d\n", constid, variable->child->semantic_value.const1->const_u.intval);
+						fprintf(FP, ".align 3\n");
+						fprintf(FP, ".text\n");
+						fprintf(FP, "lw t0, _CONSTANT_%d\n", constid++);
+						fprintf(FP, "sw t0,%d(sp)\n", frame_offset);
+                    } else {
+						fprintf(FP, ".data\n");
+						fprintf(FP, "_CONSTANT_%d: .float %f\n", constid, variable->child->semantic_value.const1->const_u.fval);
+						fprintf(FP, ".align 3\n");
+						fprintf(FP, ".text\n");
+						fprintf(FP, "la t5, _CONSTANT_%d\n", constid++);
+						fprintf(FP, "flw ft0,0(t5)\n");
+						fprintf(FP, "fsw ft0,%d(sp)\n", frame_offset);
+						/*
+						.data
+						_CONSTANT_0: .float 1.20
+						.align 3
+						.text
+						la t5,_CONSTANT_0
+						flw ft0,0(t5)
+						fsw ft0,0(sp)
+						*/
+                    }
+					frame_offset += 8;
+                    break;
+                case ARRAY_ID:      // too compilcated for me QAQ
+                    //symbol->attribute->attr.typeDescriptor->kind = ARRAY_TYPE_DESCRIPTOR;
+                    //symbol->attribute->attr.typeDescriptor->properties.arrayProperties.dimension = idx;
+                    //symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType = type;
+                    
+                    break;
+                default:
+                    fprintf(stderr, "[PARSER ERROR] no such kind of IdentifierSemanticValue\n");
+            }
+        }
+        
+        
+        
+        
+        
+        
+        
+        
+        /*
+        switch (variable->semantic_value.identifierSemanticValue.kind) {
+            case NORMAL_ID:
+                symbol->attribute->attr.typeDescriptor->kind = SCALAR_TYPE_DESCRIPTOR;
+                symbol->attribute->attr.typeDescriptor->properties.dataType = type;
+                break;
+            case ARRAY_ID:
+                symbol->attribute->attr.typeDescriptor->kind = ARRAY_TYPE_DESCRIPTOR;
+                symbol->attribute->attr.typeDescriptor->properties.arrayProperties.dimension = idx;
+                symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType = type;
+                break;
+            case WITH_INIT_ID:
+                symbol->attribute->attr.typeDescriptor->kind = SCALAR_TYPE_DESCRIPTOR;
+                symbol->attribute->attr.typeDescriptor->properties.dataType = type;
+                break;
+            default:
+                fprintf(stderr, "[PARSER ERROR] no such kind of IdentifierSemanticValue\n");
+        }
+        */
+        
+        
+        if (ignoreFirstDimensionOfArray) {
+            
+        }
+        
+    }
+}
+
+void gencode_declareType(AST_NODE* typeNode) {
+    
+}
+
+void gencode_declareFunction(AST_NODE* declarationNode){
     AST_NODE* returnType = declarationNode->child;
     AST_NODE* functionName = returnType->rightSibling;
     AST_NODE* functionParam = functionName->rightSibling;
     AST_NODE* block = functionParam->rightSibling;
+    
+    frame_offset = 0;
+    char* name = functionName->semantic_value.identifierSemanticValue.identifierName;
+    
+    
+    if(!strcmp(functionName->semantic_value.identifierSemanticValue.identifierName,"MAIN")){
+        fprintf(FP, ".text\n");
+        fprintf(FP, "\n\n_start_MAIN:\n\n");
+    }else{
+        fprintf(FP, ".text\n");
+        fprintf(FP, "\n\n_%s:\n\n",name);
+    }
+    gencode_prologue(name);
+    gencode_openScope();
+    
+	gencode_BlockNode(block);
 	
-	char* name = functionName->semantic_value.identifierSemanticValue.identifierName;
-	
-	
-	if(!strcmp(functionName->semantic_value.identifierSemanticValue.identifierName,"MAIN")){
-		fprintf(FP, ".text\n");
-		fprintf(FP, "_start_MAIN:\n\n");
-	}else{
-		fprintf(FP, ".text\n");
-		fprintf(FP, "_%s:\n\n",name);
-	}
-	gencodeprologue(name);
-	
-    gencodeBlockNode(block);
-	
-	gencodeepilogue(name);
+    gencode_closeScope();
+    gencode_epilogue(name);
 }
-void gencodeBlockNode(AST_NODE* blockNode){
-	AST_NODE *nodeptr, *tmp;
+
+void gencode_BlockNode(AST_NODE* blockNode){
+    AST_NODE *nodeptr, *tmp;
     for(nodeptr = blockNode->child; nodeptr != NULL; nodeptr = nodeptr -> rightSibling){// 2 loops at most actually
         switch(nodeptr->nodeType) {
             case VARIABLE_DECL_LIST_NODE:                           // decl_list
-                //for (tmp = nodeptr->child; tmp != NULL; tmp = tmp->rightSibling) {		// maybe we don't do this
-                //    gencodeDeclarationNode(tmp);
-                //}
+                for (tmp = nodeptr->child; tmp != NULL; tmp = tmp->rightSibling) {        // maybe we don't do this
+                    gencode_DeclarationNode(tmp);
+                }
                 break;
             case STMT_LIST_NODE:                                    // stmt_list
                 for (tmp = nodeptr->child; tmp != NULL; tmp = tmp->rightSibling) {
-                    gencodeStmtNode(tmp);
+                    gencode_StmtNode(tmp);
                 }
                 break;
             default:
@@ -116,10 +293,11 @@ void gencodeBlockNode(AST_NODE* blockNode){
     }
 }
 
-void gencodeStmtNode(AST_NODE* stmtNode){
-	if(stmtNode->nodeType == BLOCK_NODE){
+void gencode_StmtNode(AST_NODE* stmtNode){
+    if(stmtNode->nodeType == BLOCK_NODE){
+		//fprintf(stderr, "---\n");
         gencode_openScope();
-        gencodeBlockNode(stmtNode);
+        gencode_BlockNode(stmtNode);
         gencode_closeScope();
     }else if(stmtNode->nodeType == NUL_NODE){
         return;
@@ -136,7 +314,7 @@ void gencodeStmtNode(AST_NODE* stmtNode){
                 //checkAssignmentStmt(stmtNode);
                 break;
             case FUNCTION_CALL_STMT:
-                gencodeFunctionCall(stmtNode);
+                gencode_FunctionCall(stmtNode);
                 break;
             case IF_STMT:
                 //checkIfStmt(stmtNode);
@@ -155,26 +333,27 @@ void gencodeStmtNode(AST_NODE* stmtNode){
         exit(255);
     }
 }
-void gencodeFunctionCall(AST_NODE* functionCallNode){
-	AST_NODE* functionName = functionCallNode->child;
+
+void gencode_FunctionCall(AST_NODE* functionCallNode){
+    AST_NODE* functionName = functionCallNode->child;
     AST_NODE* paramList = functionName->rightSibling;
 
     //  special case 1 and 2
     if(strcmp(functionName->semantic_value.identifierSemanticValue.identifierName, "write") == 0){
-		gencodewrite(functionCallNode);
+        gencode_write(functionCallNode);
         return;
     } else if (strcmp(functionName->semantic_value.identifierSemanticValue.identifierName, "read") == 0){
-		gencoderead(functionCallNode);
+        gencode_read(functionCallNode);
         return;
     } else if (strcmp(functionName->semantic_value.identifierSemanticValue.identifierName, "fread") == 0){
-		gencodefread(functionCallNode);
+        gencode_fread(functionCallNode);
         return;
     } else {
-		// call function
-		return;
-	}
-	/*
-	// get function signature
+        // call function
+        return;
+    }
+    /*
+    // get function signature
     SymbolTableEntry* function = retrieveSymbol(functionName->semantic_value.identifierSemanticValue.identifierName,
                                 /*onlyInCurrentScope/ false);
     if (function == NULL) {
@@ -194,7 +373,7 @@ void gencodeFunctionCall(AST_NODE* functionCallNode){
         functionCallNode->dataType = function->attribute->attr.functionSignature->returnType;        // fixed
         //fprintf(stderr, "mark %d\n", function->attribute->attr.functionSignature->returnType);
     }
-	*/
+    */
 }
 
 
@@ -206,69 +385,109 @@ void gencodeFunctionCall(AST_NODE* functionCallNode){
 
 
 
-
-
-
-
-void gencodeprologue(char *name){
-	/*
-	*/
-	fprintf(FP, "addi    sp,sp,-16\n");
-	fprintf(FP, "sd      ra,8(sp)\n");
-	fprintf(FP, "sd      s0,0(sp)\n");
-	fprintf(FP, "mv      fp,sp\n");
-	fprintf(FP, "la ra, _frameSize_%s\n",name);
-	fprintf(FP, "lw ra, 0(ra)\n");
-	fprintf(FP, "sub sp, sp, ra\n");
-	fprintf(FP, "_begin_%s:\n\n", name);
+void gencode_prologue(char *name){
+    /*
+    */
+    fprintf(FP, "addi    sp,sp,-16\n");
+    fprintf(FP, "sd      ra,8(sp)\n");
+    fprintf(FP, "sd      fp,0(sp)\n");
+    fprintf(FP, "mv      fp,sp\n");
+    fprintf(FP, "la ra, _frameSize_%s\n",name);
+    fprintf(FP, "lw ra, 0(ra)\n");
+    fprintf(FP, "sub sp, sp, ra\n");
+    fprintf(FP, "_begin_%s:\n\n", name);
 }
 
-void gencodeepilogue(char *name){
-	/*
-	*/
-	fprintf(FP, "mv      sp,fp\n");
-	fprintf(FP, "ld      ra,8(sp)\n");
-	fprintf(FP, "ld      s0,0(sp)\n");
-	fprintf(FP, "addi    sp,sp,16\n");
-	fprintf(FP, "jr ra\n"); 
-	fprintf(FP, ".data\n");
-	fprintf(FP, "_frameSize_%s: 	.word	 %d\n", name, 184);
+void gencode_epilogue(char *name){
+    /*
+    */
+    fprintf(FP, "\n_end_%s:\n", name);
+    fprintf(FP, "mv      sp,fp\n");
+    fprintf(FP, "ld      ra,8(sp)\n");
+    fprintf(FP, "ld      fp,0(sp)\n");
+    fprintf(FP, "addi    sp,sp,16\n");
+    fprintf(FP, "jr ra\n"); 
+    fprintf(FP, ".data\n");
+    fprintf(FP, "_frameSize_%s:     .word    %d\n", name, frame_offset);
 }
 
-void gencodefread(AST_NODE* functionCallNode){	// I don't know parameter now
-	
+void gencode_fread(AST_NODE* functionCallNode){
+    fprintf(FP, "call _read_float\n");  // data in fa0
 }
 
-void gencoderead(AST_NODE* functionCallNode){	// I don't know parameter now
-	
+void gencode_read(AST_NODE* functionCallNode){
+    fprintf(FP, "call _read_int\n");    // data in a0
 }
 
-void gencodewrite(AST_NODE* functionCallNode){
-	AST_NODE* functionName = functionCallNode->child;
-    AST_NODE* paramList = functionName->rightSibling;
-	AST_NODE* param = paramList->child;
-	switch (param->dataType) {
-		case INT_TYPE:
-			
-			break;
-		case FLOAT_TYPE:
-			
-			break;
-		case CONST_STRING_TYPE:
-			fprintf(FP, ".data\n");
-			fprintf(FP, "_CONSTANT_%d: .ascii %s\n", constid, param->semantic_value.const1->const_u.sc);
-			fprintf(FP, ".align 3\n");
-			fprintf(FP, ".text\n");
-			fprintf(FP, "la t0, _CONSTANT_%d\n", constid++);
+void gencode_write(AST_NODE* functionCallNode){
+    AST_NODE* functionName = functionCallNode->child;
+    AST_NODE* paramList = functionName->rightSibling;   // actually not used
+    AST_NODE* param = paramList->child;
+    
+    
+    SymbolTableEntry* symbol = gencode_retrieveSymbol(param->semantic_value.identifierSemanticValue.identifierName,/*onlyInCurrentScope*/false);
+        	
+	// Case 1 Const String
+    if(param->dataType == CONST_STRING_TYPE){
+		if( !strcmp(param->semantic_value.const1->const_u.sc, "\"\\n\"") ){
+			fprintf(FP, "la t0, _endline\n");
 			fprintf(FP, "mv a0,t0\n");
 			fprintf(FP, "jal _write_str\n");
-			break;
-		default:
-			fprintf(stderr, "gencodewrite Error %d\n",param->dataType);
-			break;
-	}
+			return;
+		}
+		//fprintf(stderr, "%s\n", param->semantic_value.const1->const_u.sc);
+        fprintf(FP, ".data\n");
+        fprintf(FP, "_CONSTANT_%d: .ascii %s\n", constid, param->semantic_value.const1->const_u.sc);
+        fprintf(FP, ".align 3\n");
+        fprintf(FP, ".text\n");
+        fprintf(FP, "la t0, _CONSTANT_%d\n", constid++);
+        fprintf(FP, "mv a0,t0\n");
+        fprintf(FP, "jal _write_str\n");
+        return;
+    }
+	
+    if(symbol == NULL || symbol->attribute->attr.typeDescriptor->kind == ARRAY_TYPE_DESCRIPTOR){    // we assume cannot write array
+		fprintf(stderr, "write function Error QQ\n");
+        exit(0);
+    }
+	
+    switch (symbol->attribute->attr.typeDescriptor->properties.dataType) {
+		// Case 2 INT
+        case INT_TYPE:
+            if(symbol->global == true){
+                fprintf(FP, "la t5,_g_%d\n",symbol->offset);
+                fprintf(FP, "lw t0,0(t5)\n");
+                fprintf(FP, "mv a0,t0\n");
+                fprintf(FP, "jal _write_int\n");
+            } else {
+                fprintf(FP, "lw t0,%d(sp)\n",symbol->offset);
+                fprintf(FP, "mv a0,t0\n");
+                fprintf(FP, "jal _write_int\n");
+            }
+            break;
+		// Case 3 FLOAT
+        case FLOAT_TYPE:
+            if(symbol->global == true){
+                fprintf(FP, "la t5,_g_%d\n",symbol->offset);
+                fprintf(FP, "flw ft0,0(t5)\n");
+                fprintf(FP, "fmv.s fa0,ft0\n");
+                fprintf(FP, "jal _write_float\n");
+            } else {
+                fprintf(FP, "flw ft0,%d(sp)\n",symbol->offset);
+                fprintf(FP, "fmv.s fa0,ft0\n");
+                fprintf(FP, "jal _write_float\n");
+            }
+            
+            break;
+        default:
+            fprintf(stderr, "gencodewrite Error %d\n",param->dataType);
+            break;
+    }
 }
 // riscv64-unknown-linux-gnu-objdump -d a.out > tmp.s
+
 // qemu-riscv64 -g 1234 ./a.out
 // riscv64-unknown-linux-gnu-gdb
 // target remote localhost:1234
+
+// t0-t6, s2-s11, ft0-ft7

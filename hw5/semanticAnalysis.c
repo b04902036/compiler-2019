@@ -23,11 +23,11 @@ void processDeclarationNode(AST_NODE* declarationNode);
 void declareIdList(AST_NODE* typeNode, bool ignoreFirstDimensionOfArray, Parameter* paramList);
 void declareFunction(AST_NODE* returnTypeNode);
 void declareType(AST_NODE* typeNode);
-void processDeclDimList(AST_NODE* variableDeclDimList, TypeDescriptor* typeDescriptor, int ignoreFirstDimSize);
+void processDeclDimList(AST_NODE* variableDeclDimList, TypeDescriptor* typeDescriptor, int ignoreFirstDimSize);	// not used
 void processTypeNode(AST_NODE* typeNode);
 void processBlockNode(AST_NODE* blockNode);
 void processStmtNode(AST_NODE* stmtNode);
-void processGeneralNode(AST_NODE *node);
+void processGeneralNode(AST_NODE *node);				// not used
 void checkAssignOrExpr(AST_NODE* assignOrExprRelatedNode);
 void checkWhileStmt(AST_NODE* whileNode);
 void checkForStmt(AST_NODE* forNode);
@@ -43,8 +43,8 @@ void processExprNode(AST_NODE* exprNode);
 DATA_TYPE processVariableLValue(AST_NODE* idNode);  // change return type
 void processVariableRValue(AST_NODE* idNode);
 void processConstValueNode(AST_NODE* constValueNode);
-void getExprOrConstValue(AST_NODE* exprOrConstNode, int* iValue, float* fValue);
-void evaluateExprValue(AST_NODE* exprNode);
+void getExprOrConstValue(AST_NODE* exprOrConstNode, int* iValue, float* fValue);	// not used
+void evaluateExprValue(AST_NODE* exprNode);											// not used
 
 
 

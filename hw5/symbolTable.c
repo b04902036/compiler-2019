@@ -60,8 +60,11 @@ void initializeSymbolTable() {
     symbolTable.allocatedHashTableCount = 0;
 
     symbolTable.totalScope = NULL;
-    symbolTable.totalScopeCount = 0;
+    //symbolTable.totalScopeCount = 0;
     symbolTable.allocatedTotalScopeCount = 0;
+	
+	symbolTable.open_order = NULL;
+	symbolTable.very_total = 0;
 }
 
 
@@ -135,15 +138,18 @@ void openScope() {
     // 1.
     if (current >= already) {
         symbolTable.hashTable = (SymbolTableEntry***) realloc(symbolTable.hashTable, sizeof(SymbolTableEntry**) * (current + 1));
+		symbolTable.open_order = (int*) realloc( symbolTable.open_order, sizeof(int) * (current + 1));
         symbolTable.allocatedHashTableCount = current + 1;
     }
 
     // 2.
     symbolTable.hashTable[current] = (SymbolTableEntry**) calloc(HASH_TABLE_SIZE, sizeof(SymbolTableEntry*));
+	symbolTable.open_order[current] = symbolTable.very_total;
 
     // 3.
     ++symbolTable.totalHashTableCount;
     ++symbolTable.currentLevel;
+	++symbolTable.very_total;
 }
 
 /**
@@ -155,14 +161,15 @@ void openScope() {
 void closeScope() {
     // these variables are just to shorten the name...
     int currentHash = symbolTable.totalHashTableCount - 1;
-    int current = symbolTable.totalScopeCount;
+    //int current = symbolTable.totalScopeCount;
+    int current = symbolTable.open_order[currentHash];	// magic !
     int already = symbolTable.allocatedTotalScopeCount;
     
     // 1.
     if (current >= already) {
         // allocate three at once
-        symbolTable.totalScope = (SymbolTableEntry***) realloc(symbolTable.totalScope, sizeof(SymbolTableEntry**) * (already + 3));
-        symbolTable.allocatedTotalScopeCount += 3;
+        symbolTable.totalScope = (SymbolTableEntry***) realloc(symbolTable.totalScope, sizeof(SymbolTableEntry**) * (current+1));
+        symbolTable.allocatedTotalScopeCount = current+1;
     }
     
     // 2.
@@ -171,26 +178,54 @@ void closeScope() {
     // 3.
     --symbolTable.currentLevel;
     --symbolTable.totalHashTableCount;
-    ++symbolTable.totalScopeCount;
+    //++symbolTable.totalScopeCount;
 }
+
+
 
 // gencode retrive in the second time.
-
 void gencode_init_SymbolTable() {
-    symbolTable.scope_now = -1;
-}
-void gencode_openScope() {
-    symbolTable.scope_now++;
-}
-void gencode_closeScope() {
-	// do nothing
-}
-SymbolTableEntry* gencode_retrieveSymbol(const char* symbolName, bool onlyInCurrentScope) {	// it may be wrong !!!
-    int idx = HASH(symbolName);
-    SymbolTableEntry* ret;
+    symbolTable.currentLevel = 0;
+
+    symbolTable.hashTable = NULL;
+    symbolTable.totalHashTableCount = 0;
+    symbolTable.allocatedHashTableCount = 0;
 	
-    for (int hashId = symbolTable.scope_now; hashId > -1; --hashId) {
-        ret = symbolTable.totalScope[hashId][idx];
+	free(symbolTable.open_order);
+    symbolTable.scope_now = 0;
+}
+
+void gencode_openScope() {
+    // these variables are just to shorten the name...
+    int current = symbolTable.totalHashTableCount;
+    int already = symbolTable.allocatedHashTableCount;
+
+    // 1.
+    if (current >= already) {
+        symbolTable.hashTable = (SymbolTableEntry***) realloc(symbolTable.hashTable, sizeof(SymbolTableEntry**) * (current + 1));
+		symbolTable.allocatedHashTableCount = current + 1;
+    }
+
+    // 2.
+    symbolTable.hashTable[current] = symbolTable.totalScope[symbolTable.scope_now];
+
+    // 3.
+    ++symbolTable.totalHashTableCount;
+    ++symbolTable.currentLevel;	
+    ++symbolTable.scope_now;
+}
+
+void gencode_closeScope() {	
+    ++symbolTable.currentLevel;	
+    --symbolTable.scope_now;
+}
+
+SymbolTableEntry* gencode_retrieveSymbol(const char* symbolName, bool onlyInCurrentScope) {
+    int idx = HASH(symbolName);
+    int maxHashTableId = symbolTable.totalHashTableCount - 1;
+    SymbolTableEntry* ret;
+    for (int hashTableId = maxHashTableId; hashTableId > -1; --hashTableId) {
+        ret = symbolTable.hashTable[hashTableId][idx];
         while (ret != NULL) {
             if (!strcmp(ret->name, symbolName)) {
                 return ret;
