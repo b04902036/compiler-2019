@@ -131,6 +131,7 @@ int declaredLocally(char* symbolName)
  * 3. increase hash table count
  */
 void openScope() {
+	//fprintf(stderr, "open\n");
     // these variables are just to shorten the name...
     int current = symbolTable.totalHashTableCount;
     int already = symbolTable.allocatedHashTableCount;
@@ -159,6 +160,7 @@ void openScope() {
  * 3. subtract number of hashtable and increase number of totalScope
  */
 void closeScope() {
+	//fprintf(stderr, "close\n");
     // these variables are just to shorten the name...
     int currentHash = symbolTable.totalHashTableCount - 1;
     //int current = symbolTable.totalScopeCount;
@@ -196,6 +198,7 @@ void gencode_init_SymbolTable() {
 }
 
 void gencode_openScope() {
+	//fprintf(stderr, "gen open\n");
     // these variables are just to shorten the name...
     int current = symbolTable.totalHashTableCount;
     int already = symbolTable.allocatedHashTableCount;
@@ -216,8 +219,9 @@ void gencode_openScope() {
 }
 
 void gencode_closeScope() {	
-    ++symbolTable.currentLevel;	
-    --symbolTable.scope_now;
+	//fprintf(stderr, "gen close\n");
+    --symbolTable.totalHashTableCount;
+    --symbolTable.currentLevel;
 }
 
 SymbolTableEntry* gencode_retrieveSymbol(const char* symbolName, bool onlyInCurrentScope) {

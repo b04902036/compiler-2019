@@ -160,6 +160,9 @@ struct AST_NODE {
 	struct AST_NODE *leftmostSibling;
 	AST_TYPE nodeType;
     DATA_TYPE dataType;
+	
+	int reg_place;
+	
 	int linenumber;
 	union {
         IdentifierSemanticValue identifierSemanticValue;
