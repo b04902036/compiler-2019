@@ -177,6 +177,6 @@ typedef struct AST_NODE AST_NODE;
 AST_NODE *Allocate(AST_TYPE type);
 void semanticAnalysis(AST_NODE *root);
 int printGVNode(FILE *fp, AST_NODE* node, int count);
-int gencode(AST_NODE* node);
+void gencode(AST_NODE* node);
 
 #endif

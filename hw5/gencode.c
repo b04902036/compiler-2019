@@ -1,12 +1,10 @@
-// int / float instruction.
-// TODO :   
-//          1.Register Saving   maybe done
-//          2.Return            maybe done
-//          3.if/else                       
-//          4.while
-
-//          5.Array
-//          6.Expression Related Operation
+// TODO :
+//      1.Array
+//      2.Expression Related Operation
+// I don't want to do any register tracking.
+//      1. all variable should load from memory
+//      2. when call function, save those using register.
+//      3. occupied register only when process relop or something like that.
 
 #include "header.h"
 #include "symbolTable.h"
@@ -21,7 +19,7 @@ int global_offset = 0;
 int frame_offset = 0;
 bool global_variable_declaration = true;
 
-int gencode(AST_NODE* node);
+void gencode(AST_NODE* node);
 void gencode_Program(AST_NODE* node);
 void gencode_DeclarationNode(AST_NODE* declarationNode);
 void gencode_declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray, Parameter* paramList);
@@ -35,7 +33,7 @@ void gencode_ConstValueNode(AST_NODE* constValueNode);
 
 void gencode_BlockNode(AST_NODE* blockNode);
 void gencode_StmtNode(AST_NODE* stmtNode);
-void gencode_FunctionCall(AST_NODE* functionCallNode, bool assignR2L);
+void gencode_FunctionCall(AST_NODE* functionCallNode);
 void gencode_AssignmentStmt(AST_NODE* assignmentNode);
 
 void gencode_ForStmt(AST_NODE* forNode);
@@ -79,7 +77,7 @@ void float_2_int(AST_NODE* node);
 
 
 
-int gencode(AST_NODE* node){
+void gencode(AST_NODE* node){
     FP = fopen("output.s", "w");
     
     fprintf(FP, ".data\n");
@@ -87,15 +85,16 @@ int gencode(AST_NODE* node){
     fprintf(FP, ".align 3\n");
     
     gencode_Program(node);
+    
+    // TODO : Actually, we should free the space for Hashtable pointer.
+    
     fclose(FP);
-    return 0;
 }
 
 void gencode_Program(AST_NODE* programNode){
     AST_NODE* start = programNode->child;
     AST_NODE* tmp;
     
-    //fprintf(stderr, "+++\n");
     gencode_openScope();
 
     for (start = programNode->child; start != NULL; start = start->rightSibling) {
@@ -113,7 +112,7 @@ void gencode_Program(AST_NODE* programNode){
                 }
                 break;
             default:
-                fprintf(stderr, "[PARSER ERROR] no such type of node\n");
+                fprintf(stderr, "Program Node Error\n");
                 exit(255);
         }
     }
@@ -122,19 +121,19 @@ void gencode_Program(AST_NODE* programNode){
 
 // In gencode_RelopExpr, the return value should be placed at register(AST can access).
 DATA_TYPE gencode_RelopExpr(AST_NODE* variable) {
-    if (variable->nodeType == EXPR_NODE) {                  // INT_TYPE / FLOAT_TYPE
+    if (variable->nodeType == EXPR_NODE) {
         gencode_ExprNode(variable);
-    } else if (variable->nodeType == STMT_NODE) {           // INT_TYPE / FLOAT_TYPE / VOID_TYPE
-        gencode_FunctionCall(variable, true);        
-    } else if (variable->nodeType == IDENTIFIER_NODE) {     // INT_TYPE / FLOAT_TYPE / INT_PTR_TYPE / FLOAT_PTR_TYPE
+    } else if (variable->nodeType == STMT_NODE) {
+        gencode_FunctionCall(variable);        
+    } else if (variable->nodeType == IDENTIFIER_NODE) {
         gencode_VariableRValue(variable);    
-    } else if (variable->nodeType == CONST_VALUE_NODE) {    // INT_TYPE / FLOAT_TYPE / CONST_STRING_TYPE;
+    } else if (variable->nodeType == CONST_VALUE_NODE) {
         gencode_ConstValueNode(variable);    
     }
     return variable->dataType;
 }
 
-void gencode_ExprNode(AST_NODE* exprNode){
+void gencode_ExprNode(AST_NODE* exprNode){  // reuse register
     DATA_TYPE dataType1, dataType2;
     if (exprNode->semantic_value.exprSemanticValue.kind == BINARY_OPERATION) {
         AST_NODE *left = exprNode->child;
@@ -206,16 +205,16 @@ void gencode_ExprNode(AST_NODE* exprNode){
             exprNode->reg_place = left->reg_place;
             switch (exprNode->semantic_value.exprSemanticValue.op.binaryOp) {
                 case BINARY_OP_ADD:
-                    fprintf(FP, "add      %s, %s, %s\n", regparent, regleft, regright);
+                    fprintf(FP, "add     %s, %s, %s\n", regparent, regleft, regright);
                     break;
                 case BINARY_OP_SUB:
-                    fprintf(FP, "sub      %s, %s, %s\n", regparent, regleft, regright);
+                    fprintf(FP, "sub     %s, %s, %s\n", regparent, regleft, regright);
                     break;
                 case BINARY_OP_MUL:
-                    fprintf(FP, "mul      %s, %s, %s\n", regparent, regleft, regright);
+                    fprintf(FP, "mul     %s, %s, %s\n", regparent, regleft, regright);
                     break;
                 case BINARY_OP_DIV:
-                    fprintf(FP, "div      %s, %s, %s\n", regparent, regleft, regright);
+                    fprintf(FP, "div     %s, %s, %s\n", regparent, regleft, regright);
                     break;
                 case BINARY_OP_EQ:
                     break;
@@ -226,8 +225,10 @@ void gencode_ExprNode(AST_NODE* exprNode){
                 case BINARY_OP_NE:
                     break;
                 case BINARY_OP_GT:
+                    fprintf(FP, "slt     %s, %s, %s\n", regparent, regright, regleft);
                     break;
                 case BINARY_OP_LT:
+                    fprintf(FP, "slt     %s, %s, %s\n", regparent, regleft, regright);
                     break;
                 case BINARY_OP_AND:
                     break;
@@ -293,8 +294,8 @@ void gencode_VariableRValue(AST_NODE* idNode){
     
     if (symbol->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR) {
         int reg_place;
-        if(symbol->global == true) {    // global
-            if(symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE){
+        if (symbol->global == true) {    // global global
+            if (symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE) {
                 reg_place = get_register(true, false);
                 idNode->reg_place = reg_place;
                 fprintf(FP, "lw      %s,_g_%d\n", regmap[reg_place], symbol->offset);
@@ -305,8 +306,8 @@ void gencode_VariableRValue(AST_NODE* idNode){
                 fprintf(FP, "la      s11,_g_%d\n", symbol->offset);
                 fprintf(FP, "flw     %s,0(s11)\n", regmap[reg_place]);
             }
-        } else {    // local
-            if(symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE){
+        } else {                        // local local
+            if (symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE) {
                 reg_place = get_register(true, false);
                 idNode->reg_place = reg_place;
                 fprintf(FP, "lw      %s,%d(sp)\n", regmap[reg_place], symbol->offset);
@@ -386,6 +387,7 @@ void gencode_declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionO
                     } else {
                         fprintf(FP, "_g_%d:  .float 0\n",global_offset++);
                     }
+                    fprintf(FP, ".align 3\n");
                     break;
                 case WITH_INIT_ID:  // !!! We only handle constant initializations "int a = 3;"
                     if(symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE){
@@ -393,6 +395,7 @@ void gencode_declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionO
                     } else {
                         fprintf(FP, "_g_%d:  .float %f\n",global_offset++, variable->child->semantic_value.const1->const_u.fval);
                     }
+                    fprintf(FP, ".align 3\n");
                     break;
                 case ARRAY_ID:      // global ARRAY Declare
                     //symbol->attribute->attr.typeDescriptor->kind = ARRAY_TYPE_DESCRIPTOR;
@@ -402,14 +405,15 @@ void gencode_declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionO
                     break;
                 default:
                     fprintf(stderr, "[PARSER ERROR] no such kind of IdentifierSemanticValue\n");
+                    exit(255);
             }
-        }else{  // local declaration
+        } else {  // local declaration
             symbol->global = false;
             symbol->offset = frame_offset;
             
             switch (variable->semantic_value.identifierSemanticValue.kind) {
                 case NORMAL_ID:
-                    if(symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE){
+                    if (symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE) {
                         // nothing to do
                         frame_offset += 8;
                     } else {
@@ -418,17 +422,18 @@ void gencode_declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionO
                     }
                     break;
                 case WITH_INIT_ID:  // !!! We only handle constant initializations "int b = 4;"
-                    if(symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE){
+                    if (symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE) {
                         fprintf(FP, "li      t0,%d\n", variable->child->semantic_value.const1->const_u.intval);
                         fprintf(FP, "sw      t0,%d(sp)\n", frame_offset);
                         frame_offset += 8;
                     } else {
+                        check_s11();
                         fprintf(FP, ".data\n");
                         fprintf(FP, "_CONSTANT_%d: .float %f\n", constid, variable->child->semantic_value.const1->const_u.fval);
                         fprintf(FP, ".align 3\n");
                         fprintf(FP, ".text\n");
-                        fprintf(FP, "la      t5, _CONSTANT_%d\n", constid++);
-                        fprintf(FP, "flw     ft0,0(t5)\n");
+                        fprintf(FP, "la      s11, _CONSTANT_%d\n", constid++);
+                        fprintf(FP, "flw     ft0,0(s11)\n");
                         fprintf(FP, "fsw     ft0,%d(sp)\n", frame_offset);
                         frame_offset += 8;
                     }
@@ -441,6 +446,7 @@ void gencode_declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionO
                     break;
                 default:
                     fprintf(stderr, "[PARSER ERROR] no such kind of IdentifierSemanticValue\n");
+                    exit(255);
             }
         }
         
@@ -465,33 +471,30 @@ void gencode_declareFunction(AST_NODE* declarationNode){
     frame_offset = 0;
     char* name = functionName->semantic_value.identifierSemanticValue.identifierName;
     
-    
-    if(!strcmp(functionName->semantic_value.identifierSemanticValue.identifierName,"MAIN")){
+    if (!strcmp(functionName->semantic_value.identifierSemanticValue.identifierName,"MAIN")) {
         fprintf(FP, "\n\n\n.text\n");
         fprintf(FP, "_start_MAIN:\n");
-    }else{
+    } else {
         fprintf(FP, "\n\n\n.text\n");
         fprintf(FP, "_start_%s:\n",name);
     }
     gencode_prologue(name);
-    
     gencode_openScope();
     
-    init_register();    // only init register when declare function, handle e = (a+(b+(c+d))), register store temp value
+    init_register();            // actually no needed !
     gencode_BlockNode(block);
-    check_register_notused();
+    check_register_notused();   // when gen function block, no register should be occupied !
     
     gencode_closeScope();
-    
     gencode_epilogue(name);
 }
 
 void gencode_BlockNode(AST_NODE* blockNode){
     AST_NODE *nodeptr, *tmp;
-    for(nodeptr = blockNode->child; nodeptr != NULL; nodeptr = nodeptr -> rightSibling){// 2 loops at most actually
+    for (nodeptr = blockNode->child; nodeptr != NULL; nodeptr = nodeptr -> rightSibling) {// 2 loops at most actually
         switch(nodeptr->nodeType) {
             case VARIABLE_DECL_LIST_NODE:                           // decl_list
-                for (tmp = nodeptr->child; tmp != NULL; tmp = tmp->rightSibling) {        // maybe we don't do this
+                for (tmp = nodeptr->child; tmp != NULL; tmp = tmp->rightSibling) {
                     gencode_DeclarationNode(tmp);
                 }
                 break;
@@ -502,21 +505,19 @@ void gencode_BlockNode(AST_NODE* blockNode){
                 break;
             default:
                 fprintf(stderr, "[PARSER ERROR] void processBlockNode(AST_NODE* blockNode).\n");
-                blockNode->dataType = ERROR_TYPE;
                 exit(255);
         }
     }
 }
 
 void gencode_StmtNode(AST_NODE* stmtNode){
-    if(stmtNode->nodeType == BLOCK_NODE){
-        //fprintf(stderr, "---\n");
+    if (stmtNode->nodeType == BLOCK_NODE) {
         gencode_openScope();
         gencode_BlockNode(stmtNode);
         gencode_closeScope();
-    }else if(stmtNode->nodeType == NUL_NODE){
+    } else if (stmtNode->nodeType == NUL_NODE) {
         return;
-    }else if(stmtNode->nodeType == STMT_NODE){
+    } else if (stmtNode->nodeType == STMT_NODE) {
         STMT_KIND kind = stmtNode->semantic_value.stmtSemanticValue.kind;
         switch(kind){
             case WHILE_STMT:
@@ -527,10 +528,11 @@ void gencode_StmtNode(AST_NODE* stmtNode){
                 break;
             case ASSIGN_STMT:
                 gencode_AssignmentStmt(stmtNode);
-                free_register(stmtNode->reg_place);
+                free_register(stmtNode->reg_place);     // this is disturbing
                 break;
             case FUNCTION_CALL_STMT:
-                gencode_FunctionCall(stmtNode, false);
+                gencode_FunctionCall(stmtNode);
+                free_register(stmtNode->reg_place);     // this is disturbing
                 break;
             case IF_STMT:
                 gencode_IfStmt(stmtNode);
@@ -540,48 +542,45 @@ void gencode_StmtNode(AST_NODE* stmtNode){
                 break;
             default:
                 fprintf(stderr, "[PARSER ERROR] void processStmtNode(AST_NODE* stmtNode).\n");
-                stmtNode->dataType = ERROR_TYPE;
                 exit(255);
         }
-    }else{
+    } else {
         fprintf(stderr, "[PARSER ERROR] void processStmtNode(AST_NODE* stmtNode).\n");
-        stmtNode->dataType = ERROR_TYPE;
         exit(255);
     }
 }
 
-void gencode_FunctionCall(AST_NODE* functionCallNode, bool assignR2L){
+void gencode_FunctionCall(AST_NODE* functionCallNode){
     AST_NODE* functionName = functionCallNode->child;
     AST_NODE* paramList = functionName->rightSibling;
 
     // Special case : write ( I put read into gencode_assignment )
-    if(strcmp(functionName->semantic_value.identifierSemanticValue.identifierName, "write") == 0) {
+    if (strcmp(functionName->semantic_value.identifierSemanticValue.identifierName, "write") == 0) {
         gencode_write(functionCallNode);
         return;
     }
     
     
     // Assume ParameterLess,        
-    if(paramList->nodeType == NUL_NODE) {
-        fprintf(FP, "jal _start_%s\n", functionName->semantic_value.identifierSemanticValue.identifierName);
-    }else{  // Parameter
+    if (paramList->nodeType == NUL_NODE) {
+        caller_store();
+        fprintf(FP, "jal     _start_%s\n", functionName->semantic_value.identifierSemanticValue.identifierName);
+        caller_restore();
+    } else {  // Parameter
         // Parameter
         
     }
     
-    // Return Value originally put on int -> a0, float -> fa0
-    // we should put into register if call from relop!!! 
-    if(assignR2L){
-        int reg_place;
-        if(functionCallNode->dataType == INT_TYPE) {    // int
-            reg_place = get_register(true, false);
-            functionCallNode->reg_place = reg_place;
-            fprintf(FP, "mv      %s,a0\n", regmap[reg_place]);
-        } else {                                        // float
-            reg_place = get_register(false, false);
-            functionCallNode->reg_place = reg_place;
-            fprintf(FP, "fmv.s   %s,fa0\n", regmap[reg_place]);
-        }
+    // Put Return Value
+    int reg_place;
+    if (functionCallNode->dataType == INT_TYPE) {    // int
+        reg_place = get_register(true, false);
+        functionCallNode->reg_place = reg_place;
+        fprintf(FP, "mv      %s,a0\n", regmap[reg_place]);
+    } else {                                        // float
+        reg_place = get_register(false, false);
+        functionCallNode->reg_place = reg_place;
+        fprintf(FP, "fmv.s   %s,fa0\n", regmap[reg_place]);
     }
     return;
 }
@@ -591,14 +590,14 @@ void gencode_AssignmentStmt(AST_NODE* assignmentNode){
     AST_NODE *relop_expr = var_ref->rightSibling;
 
     // Special case : Read a = read();      b = fread();, I assume that only 2 case, not deep.
-    if (relop_expr->nodeType == STMT_NODE && strcmp(relop_expr->child->semantic_value.identifierSemanticValue.identifierName, "read") == 0){
+    if (relop_expr->nodeType == STMT_NODE && strcmp(relop_expr->child->semantic_value.identifierSemanticValue.identifierName, "read") == 0) {
         if (var_ref->dataType != INT_TYPE) {
             fprintf(stderr, "read error.\n");
             exit(255);
         }
         gencode_read(var_ref);
         return;
-    } else if (relop_expr->nodeType == STMT_NODE && strcmp(relop_expr->child->semantic_value.identifierSemanticValue.identifierName, "fread") == 0){
+    } else if (relop_expr->nodeType == STMT_NODE && strcmp(relop_expr->child->semantic_value.identifierSemanticValue.identifierName, "fread") == 0) {
         if (var_ref->dataType != FLOAT_TYPE) {
             fprintf(stderr, "fread error.\n");
             exit(255);
@@ -618,15 +617,15 @@ void gencode_AssignmentStmt(AST_NODE* assignmentNode){
     
     // Left Left Left Handside  --  var_ref
     SymbolTableEntry *symbol = retrieveSymbol(var_ref->semantic_value.identifierSemanticValue.identifierName, /*onlyInCurrentScope*/false);
-    if (symbol==NULL){
+    if (symbol==NULL) {
         fprintf(stderr, "Assign Left Handside Error.\n");
         exit(255);
     }
     
     if (symbol->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR) {
-        if(symbol->global == true) {    // global
+        if (symbol->global == true) {    // global
             check_s11();
-            if(var_ref->dataType == INT_TYPE){
+            if(var_ref->dataType == INT_TYPE) {
                 fprintf(FP, "la      s11,_g_%d\n", symbol->offset);
                 fprintf(FP, "sw      %s,0(s11)\n", regmap[relop_expr->reg_place]);
             } else {    
@@ -634,7 +633,7 @@ void gencode_AssignmentStmt(AST_NODE* assignmentNode){
                 fprintf(FP, "fsw     %s,0(s11)\n", regmap[relop_expr->reg_place]);
             }
         } else {                        // local
-            if(var_ref->dataType == INT_TYPE){
+            if(var_ref->dataType == INT_TYPE) {
                 fprintf(FP, "sw      %s,%d(sp)\n", regmap[relop_expr->reg_place], symbol->offset);
             } else {
                 fprintf(FP, "fsw     %s,%d(sp)\n", regmap[relop_expr->reg_place], symbol->offset);
@@ -656,7 +655,18 @@ void gencode_ForStmt(AST_NODE* forNode){
 }
 
 void gencode_WhileStmt(AST_NODE* whileNode){
+    AST_NODE *test = whileNode->child;
+    AST_NODE *stmt = test->rightSibling;
     
+    int local_controlid = controlid++;
+    
+    fprintf(FP, "_Test%d:\n", local_controlid);
+    gencode_AssignOrExpr(test);
+    fprintf(FP, "beqz    %s, _Lexit%d\n", regmap[test->reg_place], local_controlid);
+    free_register(test->reg_place);
+    gencode_StmtNode(stmt);
+    fprintf(FP, "j       _Test%d\n", local_controlid);
+    fprintf(FP, "_Lexit%d:\n", local_controlid);
 }
 
 void gencode_IfStmt(AST_NODE* ifNode){
@@ -664,28 +674,23 @@ void gencode_IfStmt(AST_NODE* ifNode){
     AST_NODE *stmt1 = test->rightSibling;
     AST_NODE *stmt2 = stmt1->rightSibling;  // It will be null node but not a null pointer if no else statement.
     
+    int local_controlid = controlid++;
     
     if (stmt2) {        // if "test" then "stmt1" else "stmt2"
         gencode_AssignOrExpr(test);
-        fprintf(FP, "beqz    %s, Lelse%d\n", regmap[test->reg_place], controlid);
-        free_register(test->reg_place);
-        controlid++;
+        fprintf(FP, "beqz    %s, Lelse%d\n", regmap[test->reg_place], local_controlid);
         gencode_StmtNode(stmt1);
-        controlid--;
-        fprintf(FP, "j       Lexit%d\n", controlid);
-        fprintf(FP, "Lelse%d:\n", controlid);
-        controlid++;
+        fprintf(FP, "j       Lexit%d\n", local_controlid);
+        fprintf(FP, "Lelse%d:\n", local_controlid);
         gencode_StmtNode(stmt2);
-        controlid--;
-        fprintf(FP, "Lexit%d:\n", controlid);
+        fprintf(FP, "Lexit%d:\n", local_controlid);
+        free_register(test->reg_place);
     } else {            // if "test" then "stmt1"
         gencode_AssignOrExpr(test);
-        fprintf(FP, "beqz    %s, Lexit%d\n", regmap[test->reg_place], controlid);
-        free_register(test->reg_place);
-        controlid++;
+        fprintf(FP, "beqz    %s, Lexit%d\n", regmap[test->reg_place], local_controlid);
         gencode_StmtNode(stmt1);
-        controlid--;
-        fprintf(FP, "Lexit%d:\n", controlid);
+        fprintf(FP, "Lexit%d:\n", local_controlid);
+        free_register(test->reg_place);
     }
     
 }
@@ -705,15 +710,16 @@ void gencode_AssignOrExpr(AST_NODE* assignOrExprRelatedNode) {
 
 void gencode_ReturnStmt(AST_NODE* returnNode){// put value on a0 or fa0
     DATA_TYPE type_declaration, type_return;
+    char *functionName, *returnTypeNodeName;
     
     // 1. Get the type of type_declaration
     for (AST_NODE *tmp = returnNode->parent; tmp != NULL; tmp = tmp->parent) {
         if( tmp->nodeType == DECLARATION_NODE &&
-            tmp->semantic_value.declSemanticValue.kind == FUNCTION_DECL){
+            tmp->semantic_value.declSemanticValue.kind == FUNCTION_DECL) {
                 
     		AST_NODE *returnTypeNode = tmp->child;
-    		char returnTypeNodeName[100];
-    		strcpy(returnTypeNodeName, returnTypeNode->semantic_value.identifierSemanticValue.identifierName);
+    		returnTypeNodeName = returnTypeNode->semantic_value.identifierSemanticValue.identifierName;
+            functionName = returnTypeNode->rightSibling->semantic_value.identifierSemanticValue.identifierName;
 
     		if ( strcmp(returnTypeNodeName,"void")==0 ) {
     			type_declaration = VOID_TYPE;
@@ -735,7 +741,7 @@ void gencode_ReturnStmt(AST_NODE* returnNode){// put value on a0 or fa0
 
     // 2. Get the type of type_return
     AST_NODE *relop_expr = returnNode->child;
-    if(relop_expr->nodeType == NUL_NODE){           // return "null node"
+    if (relop_expr->nodeType == NUL_NODE) {           // return "null node"
         return;
     }
     type_return = gencode_RelopExpr(relop_expr);    // return "relop_expr" 
@@ -755,7 +761,11 @@ void gencode_ReturnStmt(AST_NODE* returnNode){// put value on a0 or fa0
         free_register(relop_expr->reg_place);
     } else {
         fprintf(stderr, "Return type not known error!\n");
+        exit(255);
     }
+    
+    fprintf(FP, "j       _end_%s\n", functionName);
+    
 }
 
 
@@ -795,12 +805,12 @@ void gencode_fread(AST_NODE* idNode){
     
     SymbolTableEntry* symbol = gencode_retrieveSymbol(idNode->semantic_value.identifierSemanticValue.identifierName,/*onlyInCurrentScope*/false);
     
-    if(symbol==NULL){
+    if (symbol==NULL) {
         fprintf(stderr, "fread error\n");
         exit(255);
     }
     
-    if(symbol->global == true){
+    if (symbol->global == true) {
         fprintf(FP, "la      s11,_g_%d\n",symbol->offset);
         fprintf(FP, "fsw     ft0,0(s11)\n");
     } else {
@@ -814,12 +824,12 @@ void gencode_read(AST_NODE* idNode){
     
     SymbolTableEntry* symbol = gencode_retrieveSymbol(idNode->semantic_value.identifierSemanticValue.identifierName,/*onlyInCurrentScope*/false);
     
-    if(symbol==NULL){
+    if (symbol==NULL) {
         fprintf(stderr, "fread error\n");
         exit(255);
     }
     
-    if(symbol->global == true){
+    if (symbol->global == true) {
         fprintf(FP, "la      s11,_g_%d\n",symbol->offset);
         fprintf(FP, "sw      t0,0(s11)\n");
     } else {
@@ -836,8 +846,8 @@ void gencode_write(AST_NODE* functionCallNode){
     SymbolTableEntry* symbol = gencode_retrieveSymbol(param->semantic_value.identifierSemanticValue.identifierName,/*onlyInCurrentScope*/false);
             
     // Case 1 Const String
-    if(param->dataType == CONST_STRING_TYPE){
-        if( !strcmp(param->semantic_value.const1->const_u.sc, "\"\\n\"") ){
+    if (param->dataType == CONST_STRING_TYPE) {
+        if (!strcmp(param->semantic_value.const1->const_u.sc, "\"\\n\"")) {
             fprintf(FP, "la      t0,_endline\n");
             fprintf(FP, "mv      a0,t0\n");
             fprintf(FP, "jal     _write_str\n");
@@ -860,7 +870,7 @@ void gencode_write(AST_NODE* functionCallNode){
         return;
     }
     
-    if(symbol == NULL || symbol->attribute->attr.typeDescriptor->kind == ARRAY_TYPE_DESCRIPTOR){    // we assume cannot write array
+    if (symbol == NULL || symbol->attribute->attr.typeDescriptor->kind == ARRAY_TYPE_DESCRIPTOR) {    // we assume cannot write array
         fprintf(stderr, "write function Error QQ\n");
         exit(255);
     }
@@ -868,7 +878,7 @@ void gencode_write(AST_NODE* functionCallNode){
     switch (symbol->attribute->attr.typeDescriptor->properties.dataType) {
         // Case 2 INT
         case INT_TYPE:
-            if(symbol->global == true){
+            if (symbol->global == true) {
                 fprintf(FP, "la      s11,_g_%d\n",symbol->offset);
                 fprintf(FP, "lw      t0,0(s11)\n");
                 fprintf(FP, "mv      a0,t0\n");
@@ -881,7 +891,7 @@ void gencode_write(AST_NODE* functionCallNode){
             break;
         // Case 3 FLOAT
         case FLOAT_TYPE:
-            if(symbol->global == true){
+            if (symbol->global == true) {
                 fprintf(FP, "la      s11,_g_%d\n",symbol->offset);
                 fprintf(FP, "flw     ft0,0(s11)\n");
                 fprintf(FP, "fmv.s   fa0,ft0\n");
@@ -895,7 +905,7 @@ void gencode_write(AST_NODE* functionCallNode){
             break;
         default:
             fprintf(stderr, "gencodewrite Error %d\n",param->dataType);
-            break;
+            exit(255);
     }
 }
 
@@ -905,41 +915,41 @@ void init_register(){
 }
 
 int get_register(bool getint, bool parameter){
-    if(getint & parameter){
-        for(int i=39; i<=44;i++){
-            if(reg_arr[i]==false){
+    if (getint & parameter) {
+        for (int i=39; i<=44;i++) {
+            if (reg_arr[i]==false) {
                 reg_arr[i] = true;
                 return i;
             }
         }
         fprintf(stderr, "Int, Parameter register Error.\n");
         exit(255);
-    }else if(getint & !parameter){
-        for(int i=0; i<=16;i++){
-            if(reg_arr[i]==false){
+    } else if (getint & !parameter) {
+        for (int i=0; i<=16;i++) {
+            if (reg_arr[i]==false) {
                 reg_arr[i] = true;
                 return i;
             }
         }
-        fprintf(stderr, "Int, Parameter register Error.\n");
+        fprintf(stderr, "Int, Normal register Error.\n");
         exit(255);
-    }else if(!getint & parameter){
-        for(int i=45; i<=50;i++){
-            if(reg_arr[i]==false){
+    } else if (!getint & parameter) {
+        for (int i=45; i<=50;i++) {
+            if (reg_arr[i]==false) {
                 reg_arr[i] = true;
                 return i;
             }
         }
-        fprintf(stderr, "Int, Parameter register Error.\n");
+        fprintf(stderr, "Float, Parameter register Error.\n");
         exit(255);
-    }else if(!getint & !parameter){
-        for(int i=17; i<=38;i++){
-            if(reg_arr[i]==false){
+    }else if (!getint & !parameter) {
+        for (int i=17; i<=38;i++) {
+            if (reg_arr[i]==false) {
                 reg_arr[i] = true;
                 return i;
             }
         }
-        fprintf(stderr, "We don't have enough money to buy float register QQ. Program Crash!!!\n");
+        fprintf(stderr, "Float, Normal register Error.\n");
         exit(255);
     }
 }
@@ -949,15 +959,15 @@ int free_register(int id){
 }
 
 void check_s11(){
-    if(reg_arr[16]==true){
+    if (reg_arr[16]==true) {
         fprintf(stderr, "No space for -s11- to load addr of const float.\n");
         exit(255);
     }
 }
 
 void check_register_notused(){
-    for(int i=0; i<=50;i++){
-        if(reg_arr[i]==true){
+    for (int i=0; i<=50;i++) {
+        if (reg_arr[i]==true) {
             fprintf(stderr, "Some register is blocked error\n");
             exit(255);
         }
@@ -966,8 +976,8 @@ void check_register_notused(){
 
 
 bool is_int_reg(int regnum){
-    if( 0<=regnum && regnum<=16) return true;
-    if(39<=regnum && regnum<=44) return true;
+    if ( 0<=regnum && regnum<=16) return true;
+    if (39<=regnum && regnum<=44) return true;
     return false;
 }
 
@@ -979,16 +989,16 @@ void callee_restore(){
 }
 void caller_store(){
     int num = 0;
-    for(int i=0; i<=50; i++){
-        if(reg_arr[i]==true)    num++;
+    for (int i=0; i<=50; i++) {
+        if (reg_arr[i]==true)    num++;
     }
-    if(num){
+    if (num) {
         fprintf(FP, "addi    sp,sp,-%d\n",8*num);
         
         num = 0;
-        for(int i=0; i<=50; i++){
-            if(reg_arr[i]==true){
-                if(is_int_reg(i))   fprintf(FP, "sd    %s,%d(sp)\n", regmap[i], 8*num);
+        for (int i=0; i<=50; i++) {
+            if (reg_arr[i]==true) {
+                if (is_int_reg(i))  fprintf(FP, "sd    %s,%d(sp)\n", regmap[i], 8*num);
                 else                fprintf(FP, "fsw   %s,%d(sp)\n", regmap[i], 8*num);
                 num++;
             }
@@ -997,14 +1007,14 @@ void caller_store(){
 }
 void caller_restore(){
     int num = 0;
-    for(int i=0; i<=50; i++){
-        if(reg_arr[i]==true){
-            if(is_int_reg(i))   fprintf(FP, "ld    %s,%d(sp)\n", regmap[i], 8*num);
+    for (int i=0; i<=50; i++) {
+        if (reg_arr[i]==true) {
+            if (is_int_reg(i))  fprintf(FP, "ld    %s,%d(sp)\n", regmap[i], 8*num);
             else                fprintf(FP, "flw   %s,%d(sp)\n", regmap[i], 8*num);
             num++;
         }
     }
-    if(num){
+    if (num) {
         fprintf(FP, "addi    sp,sp,%d\n",8*num);
     }
 }
