@@ -286,14 +286,14 @@ void gencode_ExprNode(AST_NODE* exprNode){  // reuse register
 }
 
 void gencode_VariableRValue(AST_NODE* idNode){
+    int reg_place;
     SymbolTableEntry *symbol = retrieveSymbol(idNode->semantic_value.identifierSemanticValue.identifierName, false);
     if (symbol==NULL){
         fprintf(stderr, "RValue Error.\n");
         exit(255);
     }
-    
+    fprintf(stderr, "offset : %d\n", symbol->offset);
     if (symbol->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR) {
-        int reg_place;
         if (symbol->global == true) {    // global global
             if (symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE) {
                 reg_place = get_register(true, false);
@@ -319,10 +319,54 @@ void gencode_VariableRValue(AST_NODE* idNode){
         }
     }
     else {  // Array Element
-        // Array Element
-    }
-}
+        // TODO
+        DATA_TYPE element_type = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType;
+        const int const *dimension_size = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.sizeInEachDimension;
+        int now_dimension = 1;
+        AST_NODE *expr = idNode->child;
+        int reference_offset = get_register(true, false);
 
+        gencode_RelopExpr(expr);
+        fprintf(FP, "mv     %s,%s\n", regmap[reference_offset], regmap[expr->reg_place]);
+        free_register(expr->reg_place);
+        for (expr = expr->rightSibling; expr != NULL; expr = expr->rightSibling, ++now_dimension) {
+            gencode_RelopExpr(expr);
+            fprintf(FP, "mul    %1$s,%1$s,%2$d\n", regmap[reference_offset], dimension_size[now_dimension]);
+            fprintf(FP, "add    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[expr->reg_place]);
+            free_register(expr->reg_place);
+        }
+        fprintf(FP, "slli   %1$s,%1$s,2\n", regmap[reference_offset]);
+        if (symbol->global == true) {    // global global
+            reg_place = get_register(true, false);
+            fprintf(FP, "la      %s,_g_%d\n", regmap[reg_place], symbol->offset);
+            fprintf(FP, "add    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
+            free_register(reg_place);
+            if (symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType == INT_TYPE) {
+                reg_place = get_register(true, false);
+                idNode->reg_place = reg_place;
+                fprintf(FP, "lw      %s,0(%s)\n", regmap[reg_place], regmap[reference_offset]);
+            } else {    
+                reg_place = get_register(false, false);
+                idNode->reg_place = reg_place;
+                fprintf(FP, "flw     %s,0(%s)\n", regmap[reg_place], regmap[reference_offset]);
+            }
+        } else {                        // local local
+            fprintf(FP, "add      %1$s,%1$s,sp\n", regmap[reference_offset]);
+            fprintf(FP, "addi   %1$s,%1$s,%2$d\n", regmap[reference_offset], symbol->offset);
+            if (symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType == INT_TYPE) {
+                reg_place = get_register(true, false);
+                idNode->reg_place = reg_place;
+                fprintf(FP, "flw     %s,0(%s)\n", regmap[reg_place], regmap[reference_offset]);
+            } else {
+                reg_place = get_register(false, false);
+                idNode->reg_place = reg_place;
+                fprintf(FP, "flw     %s,0(%s)\n", regmap[reg_place], regmap[reference_offset]);
+            }
+        }
+        free_register(reference_offset);
+    }
+
+}
 void gencode_ConstValueNode(AST_NODE* constValueNode){
     int reg_place;
     switch (constValueNode->semantic_value.const1->const_type) {
@@ -439,10 +483,7 @@ void gencode_declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionO
                     }
                     break;
                 case ARRAY_ID:      // local ARRAY Declare
-                    //symbol->attribute->attr.typeDescriptor->kind = ARRAY_TYPE_DESCRIPTOR;
-                    //symbol->attribute->attr.typeDescriptor->properties.arrayProperties.dimension = idx;
-                    //symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType = type;
-                    
+                    // TODO
                     break;
                 default:
                     fprintf(stderr, "[PARSER ERROR] no such kind of IdentifierSemanticValue\n");
@@ -567,7 +608,7 @@ void gencode_FunctionCall(AST_NODE* functionCallNode){
         fprintf(FP, "jal     _start_%s\n", functionName->semantic_value.identifierSemanticValue.identifierName);
         caller_restore();
     } else {  // Parameter
-        // Parameter
+        // TODO
         
     }
     
