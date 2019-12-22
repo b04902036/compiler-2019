@@ -5,6 +5,8 @@
 //      1. all variable should load from memory
 //      2. when call function, save those using register.
 //      3. occupied register only when process relop or something like that.
+// FIXME:
+//      1. How to know if passing a float / int pointer to int / float pointer when doing function parameter passing?
 
 #include "header.h"
 #include "symbolTable.h"
@@ -52,6 +54,9 @@ void caller_restore();
 void gencode_read(AST_NODE* idNode);
 void gencode_fread(AST_NODE* idNode);
 void gencode_write(AST_NODE* functionCallNode);
+
+void clear_parameter_register();
+int get_array_reference(AST_NODE *array, SymbolTableEntry *symbol);
 
 // I assume that no (a1+(a2+(a3+(a4+(a5+(...))))))
 // Only need in expression in function, store at those ast nodes.
@@ -196,7 +201,6 @@ void gencode_ExprNode(AST_NODE* exprNode){  // reuse register
                     fprintf(stderr, "Unknown Binary Operator.\n");
                     exit(255);
             }
-            
         } else if (dataType1 == INT_TYPE && dataType2 == INT_TYPE) {     // both are int
             exprNode->dataType = INT_TYPE;
             const char *regleft = regmap[left->reg_place];
@@ -331,7 +335,40 @@ void gencode_VariableRValue(AST_NODE* idNode){
         const int total_dimension = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.dimension;
         AST_NODE *expr = idNode->child;
         int reference_offset = get_register(true, false);
+        bool is_pointer = false;
 
+        // special case, we simply pass the array pointer itself
+        if (expr == NULL) {
+            if (symbol->global == true) {    // global global
+                reg_place = get_register(true, false);
+                idNode->reg_place = reg_place;
+                fprintf(FP, "la      %s,_g_%d\n", regmap[reference_offset], symbol->offset);
+                fprintf(FP, "mv     %s,%s\n", regmap[reg_place], regmap[reference_offset]);
+            } else {                        // local local
+                if (symbol->isFunctionParameter) {
+                    // if it is function parameter, then it will be stored as a pointer on current stack frame
+                    reg_place = get_register(true, false);
+                    fprintf(FP, "li     %s,0\n", regmap[reference_offset]);
+                    fprintf(FP, "ld    %s,%d(sp)\n", regmap[reg_place], symbol->offset);
+                    fprintf(FP, "add    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
+                    free_register(reg_place);
+                } else {
+                    // otherwise it is simply an array in current stack frame
+                    fprintf(FP, "li     %s,0\n", regmap[reference_offset]);
+                    fprintf(FP, "add      %1$s,%1$s,sp\n", regmap[reference_offset]);
+                    reg_place = get_register(true, false);
+                    fprintf(FP, "li     %s,%d\n", regmap[reg_place], symbol->offset);
+                    fprintf(FP, "add   %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
+                    free_register(reg_place);
+                }
+
+                reg_place = get_register(true, false);
+                idNode->reg_place = reg_place;
+                fprintf(FP, "mv     %s,%s\n", regmap[reg_place], regmap[reference_offset]);
+            }
+            free_register(reference_offset);
+            return;
+        }
         gencode_RelopExpr(expr);
         fprintf(FP, "mv     %s,%s\n", regmap[reference_offset], regmap[expr->reg_place]);
         free_register(expr->reg_place);
@@ -339,14 +376,21 @@ void gencode_VariableRValue(AST_NODE* idNode){
         // handle array reference
         for (expr = expr->rightSibling; expr != NULL; expr = expr->rightSibling, ++now_dimension) {
             gencode_RelopExpr(expr);
-            fprintf(FP, "mul    %1$s,%1$s,%2$d\n", regmap[reference_offset], dimension_size[now_dimension]);
+            reg_place = get_register(true, false);
+            fprintf(FP, "li     %s,%d\n", regmap[reg_place], dimension_size[now_dimension]);
+            fprintf(FP, "mul    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
+            free_register(reg_place);
             fprintf(FP, "add    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[expr->reg_place]);
             free_register(expr->reg_place);
         }
 
         // now we need to handle pointer reference
         for (; now_dimension < total_dimension; ++now_dimension) {
-            fprintf(FP, "mul    %1$s,%1$s,%2$d\n", regmap[reference_offset], dimension_size[now_dimension]);
+            is_pointer = true;
+            reg_place = get_register(true, false);
+            fprintf(FP, "li     %s,%d\n", regmap[reg_place], dimension_size[now_dimension]);
+            fprintf(FP, "mul    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
+            free_register(reg_place);
         }
 
         fprintf(FP, "slli   %1$s,%1$s,2\n", regmap[reference_offset]);
@@ -355,7 +399,11 @@ void gencode_VariableRValue(AST_NODE* idNode){
             fprintf(FP, "la      %s,_g_%d\n", regmap[reg_place], symbol->offset);
             fprintf(FP, "add    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
             free_register(reg_place);
-            if (symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType == INT_TYPE) {
+            if (is_pointer) {
+                reg_place = get_register(true, false);
+                idNode->reg_place = reg_place;
+                fprintf(FP, "mv     %s,%s\n", regmap[reg_place], regmap[reference_offset]);
+            } else if (symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType == INT_TYPE) {
                 reg_place = get_register(true, false);
                 idNode->reg_place = reg_place;
                 fprintf(FP, "lw      %s,0(%s)\n", regmap[reg_place], regmap[reference_offset]);
@@ -366,19 +414,25 @@ void gencode_VariableRValue(AST_NODE* idNode){
             }
         } else {                        // local local
             if (symbol->isFunctionParameter) {
-                fprintf(stderr, "variable %s is function parameter?\n", symbol->name);
                 // if it is function parameter, then it will be stored as a pointer on current stack frame
                 reg_place = get_register(true, false);
-                fprintf(FP, "ld    %s,%d(sp)", regmap[reg_place], symbol->offset);
+                fprintf(FP, "ld    %s,%d(sp)\n", regmap[reg_place], symbol->offset);
                 fprintf(FP, "add    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
                 free_register(reg_place);
             } else {
                 // otherwise it is simply an array in current stack frame
                 fprintf(FP, "add      %1$s,%1$s,sp\n", regmap[reference_offset]);
-                fprintf(FP, "addi   %1$s,%1$s,%2$d\n", regmap[reference_offset], symbol->offset);
+                reg_place = get_register(true, false);
+                fprintf(FP, "li     %s,%d\n", regmap[reg_place], symbol->offset);
+                fprintf(FP, "add   %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
+                free_register(reg_place);
             }
 
-            if (symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType == INT_TYPE) {
+            if (is_pointer) {
+                reg_place = get_register(true, false);
+                idNode->reg_place = reg_place;
+                fprintf(FP, "mv     %s,%s\n", regmap[reg_place], regmap[reference_offset]);
+            } else if (symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType == INT_TYPE) {
                 reg_place = get_register(true, false);
                 idNode->reg_place = reg_place;
                 fprintf(FP, "lw     %s,0(%s)\n", regmap[reg_place], regmap[reference_offset]);
@@ -444,10 +498,10 @@ void gencode_declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionO
     // when declaring parameter for function, we'll need to know which parameter is now dealing with
     // in order to know which register we should get value from
     // note that first register for parameter is a2 / fa2
-    int param_count = 2;
+    int reg_place;
 
     AST_NODE* dataType = declarationNode->child;
-    for (AST_NODE* variable = dataType->rightSibling; variable != NULL; variable = variable->rightSibling, ++param_count) {
+    for (AST_NODE* variable = dataType->rightSibling; variable != NULL; variable = variable->rightSibling) {
         SymbolTableEntry* symbol = gencode_retrieveSymbol(variable->semantic_value.identifierSemanticValue.identifierName,/*onlyInCurrentScope*/true);
         if (symbol == NULL) {
             fprintf(stderr, "no such symbol \"%s\" in symbol table\n",variable->semantic_value.identifierSemanticValue.identifierName);
@@ -493,16 +547,19 @@ void gencode_declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionO
                 switch (variable->semantic_value.identifierSemanticValue.kind) {
                     case NORMAL_ID:
                         if (symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE) {
-                            fprintf(FP, "sw     a%d,%d(sp)\n", param_count, frame_offset);        
+                            reg_place = get_register(true, true);
+                            fprintf(FP, "sw     %s,%d(sp)\n", regmap[reg_place], frame_offset);        
                         } else {
-                            fprintf(FP, "fsw    fa%d,%d(sp)\n", param_count, frame_offset);
+                            reg_place = get_register(false, true);
+                            fprintf(FP, "fsw    %s,%d(sp)\n", regmap[reg_place], frame_offset);
                         }
                         frame_offset += 8;
                         break;
                     case ARRAY_ID:
                         {
                             // we store a pointer here, so it is 8 bytes long
-                            fprintf(FP, "sd     a%d,%d(sp)", param_count, frame_offset);
+                            reg_place = get_register(true, true);
+                            fprintf(FP, "sd     %s,%d(sp)\n", regmap[reg_place], frame_offset);
                             frame_offset += 8;
                         }
                         break;
@@ -583,8 +640,13 @@ void gencode_declareFunction(AST_NODE* declarationNode){
     }
     gencode_prologue(name);
     gencode_openScope();
-    if (functionParam->child != NULL)
-        gencode_DeclarationNode(functionParam->child);
+    
+    functionParam = functionParam->child;
+    while (functionParam != NULL) {
+        gencode_DeclarationNode(functionParam);
+        functionParam = functionParam->rightSibling;
+    }
+    clear_parameter_register();
 
     init_register();            // actually no needed !
     gencode_BlockNode(block);
@@ -675,33 +737,39 @@ void gencode_FunctionCall(AST_NODE* functionCallNode){
         caller_restore();
     } else {  // Parameter
         // TODO
-        int param_count = 2;
+        int reg_place;
         AST_NODE *param;
         DATA_TYPE param_type;
         Parameter *expect_param = symbol->attribute->attr.functionSignature->parameterList;
         
         // first do type checking and convert if necessary
         // then store parameter into a[2-7] register
-        for (param = paramList->child; param != NULL; param = param->rightSibling, expect_param = expect_param->next, ++param_count) {
+        for (param = paramList->child; param != NULL; param = param->rightSibling, expect_param = expect_param->next) {
             param_type = gencode_RelopExpr(param);
             if (expect_param->type->kind == SCALAR_TYPE_DESCRIPTOR) {
                 if (param_type == INT_TYPE && expect_param->type->properties.dataType == FLOAT_TYPE) {
                     int_2_float(param);
-                    fprintf(FP, "fmv.s    fa%d,%s\n", param_count, regmap[param->reg_place]);
+                    reg_place = get_register(false, true);
+                    fprintf(FP, "fmv.s    %s,%s\n", regmap[reg_place], regmap[param->reg_place]);
                 } else if (param_type == FLOAT_TYPE && expect_param->type->properties.dataType == INT_TYPE) {
                     float_2_int(param);
-                    fprintf(FP, "mv     a%d,%s\n", param_count, regmap[param->reg_place]);
+                    reg_place = get_register(true, true);
+                    fprintf(FP, "mv     %s,%s\n", regmap[reg_place], regmap[param->reg_place]);
                 } else if (param_type == INT_TYPE) {
-                    fprintf(FP, "mv     a%d,%s\n", param_count, regmap[param->reg_place]);
+                    reg_place = get_register(true, true);
+                    fprintf(FP, "mv     %s,%s\n", regmap[reg_place], regmap[param->reg_place]);
                 } else {
-                    fprintf(FP, "fmv.s    fa%d,%s\n", param_count, regmap[param->reg_place]);
+                    reg_place = get_register(false, true);
+                    fprintf(FP, "fmv.s    %s,%s\n", regmap[reg_place], regmap[param->reg_place]);
                 }
             } else {
-                fprintf(FP, "mv     a%d,%s\n", param_count, regmap[param->reg_place]);
+                reg_place = get_register(true, true);
+                fprintf(FP, "mv     %s,%s\n", regmap[reg_place], regmap[param->reg_place]);
             }
             free_register(param->reg_place);
         }
         
+        clear_parameter_register();
         caller_store();
         fprintf(FP, "jal     _start_%s\n", functionName->semantic_value.identifierSemanticValue.identifierName);
         caller_restore();
@@ -792,7 +860,10 @@ void gencode_AssignmentStmt(AST_NODE* assignmentNode){
         free_register(expr->reg_place);
         for (expr = expr->rightSibling; expr != NULL; expr = expr->rightSibling, ++now_dimension) {
             gencode_RelopExpr(expr);
-            fprintf(FP, "mul    %1$s,%1$s,%2$d\n", regmap[reference_offset], dimension_size[now_dimension]);
+            reg_place = get_register(true, false);
+            fprintf(FP, "li     %s,%d\n", regmap[reg_place], dimension_size[now_dimension]);
+            fprintf(FP, "mul    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
+            free_register(reg_place);
             fprintf(FP, "add    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[expr->reg_place]);
             free_register(expr->reg_place);
         }
@@ -808,8 +879,11 @@ void gencode_AssignmentStmt(AST_NODE* assignmentNode){
                 fprintf(FP, "fsw     %s,0(%s)\n", regmap[relop_expr->reg_place], regmap[reference_offset]);
             }
         } else {                        // local local
+            reg_place = get_register(true, false);
             fprintf(FP, "add      %1$s,%1$s,sp\n", regmap[reference_offset]);
-            fprintf(FP, "addi   %1$s,%1$s,%2$d\n", regmap[reference_offset], symbol->offset);
+            fprintf(FP, "li     %s,%d\n", regmap[reg_place], symbol->offset);
+            fprintf(FP, "add   %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
+            free_register(reg_place);
             if (symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType == INT_TYPE) {
                 fprintf(FP, "sw     %s,0(%s)\n", regmap[relop_expr->reg_place], regmap[reference_offset]);
             } else {
@@ -984,12 +1058,19 @@ void gencode_fread(AST_NODE* idNode){
         exit(255);
     }
     
-    if (symbol->global == true) {
-        fprintf(FP, "la      s11,_g_%d\n",symbol->offset);
-        fprintf(FP, "fsw     ft0,0(s11)\n");
+    if (symbol->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR) { 
+        if (symbol->global == true) {
+            fprintf(FP, "la      s11,_g_%d\n",symbol->offset);
+            fprintf(FP, "fsw     ft0,0(s11)\n");
+        } else {
+            fprintf(FP, "fsw     ft0,%d(sp)\n",symbol->offset);
+        }
     } else {
-        fprintf(FP, "fsw     ft0,%d(sp)\n",symbol->offset);
+        int reg_array = get_array_reference(idNode, symbol);
+        fprintf(FP, "fsw     ft0,0(%s)\n", regmap[reg_array]);
+        free_register(reg_array);
     }
+
 }
 
 void gencode_read(AST_NODE* idNode){
@@ -1003,24 +1084,84 @@ void gencode_read(AST_NODE* idNode){
         exit(255);
     }
     
-    if (symbol->global == true) {
-        fprintf(FP, "la      s11,_g_%d\n",symbol->offset);
-        fprintf(FP, "sw      t0,0(s11)\n");
+    if (symbol->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR) {
+        if (symbol->global == true) {
+            fprintf(FP, "la      s11,_g_%d\n",symbol->offset);
+            fprintf(FP, "sw     t0,0(s11)\n");
+        } else {
+            fprintf(FP, "sw     t0,%d(sp)\n",symbol->offset);
+        }
     } else {
-        fprintf(FP, "sw      t0,%d(sp)\n",symbol->offset);
+        int reg_array = get_array_reference(idNode, symbol);
+        fprintf(FP, "sw     t0,0(%s)\n", regmap[reg_array]);
+        free_register(reg_array);
     }
+}
+
+int get_array_reference(AST_NODE *array, SymbolTableEntry *symbol) {
+    int reg_place;
+    bool is_pointer = false;
+    DATA_TYPE element_type = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType;
+    const int const *dimension_size = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.sizeInEachDimension;
+    int now_dimension = 1;
+    const int total_dimension = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.dimension;
+    AST_NODE *expr = array->child;
+    int reference_offset = get_register(true, false);
+
+    gencode_RelopExpr(expr);
+    fprintf(FP, "mv     %s,%s\n", regmap[reference_offset], regmap[expr->reg_place]);
+    free_register(expr->reg_place);
+    for (expr = expr->rightSibling; expr != NULL; expr = expr->rightSibling, ++now_dimension) {
+        gencode_RelopExpr(expr);
+        reg_place = get_register(true, false);
+        fprintf(FP, "li     %s,%d\n", regmap[reg_place], dimension_size[now_dimension]);
+        fprintf(FP, "mul    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
+        free_register(reg_place);
+        fprintf(FP, "add    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[expr->reg_place]);
+        free_register(expr->reg_place);
+    }
+
+    // now we need to handle pointer reference
+    for (; now_dimension < total_dimension; ++now_dimension) {
+        is_pointer = true;
+        reg_place = get_register(true, false);
+        fprintf(FP, "li     %s,%d\n", regmap[reg_place], dimension_size[now_dimension]);
+        fprintf(FP, "mul    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
+        free_register(reg_place);
+    }
+
+    fprintf(FP, "slli   %1$s,%1$s,2\n", regmap[reference_offset]);
+    if (symbol->global == true) {    // global global
+        fprintf(FP, "la      s11,_g_%d\n", symbol->offset);
+        fprintf(FP, "add    %1$s,%1$s,s11\n", regmap[reference_offset]);
+    } else {                        // local local
+        if (symbol->isFunctionParameter) {
+            reg_place = get_register(true, false);
+            fprintf(FP, "ld    %s,%d(sp)\n", regmap[reg_place], symbol->offset);
+            fprintf(FP, "add    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
+            free_register(reg_place);
+        } else {
+            reg_place = get_register(true, false);
+            fprintf(FP, "add      %1$s,%1$s,sp\n", regmap[reference_offset]);
+            fprintf(FP, "li     %s,%d\n", regmap[reg_place], symbol->offset);
+            fprintf(FP, "add   %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
+            free_register(reg_place);
+        }
+    }
+    return reference_offset;
 }
 
 void gencode_write(AST_NODE* functionCallNode){
     AST_NODE* functionName = functionCallNode->child;
     AST_NODE* paramList = functionName->rightSibling;   // actually not used
     AST_NODE* param = paramList->child;
+    DATA_TYPE dataType;
     
-    
-    SymbolTableEntry* symbol = gencode_retrieveSymbol(param->semantic_value.identifierSemanticValue.identifierName,/*onlyInCurrentScope*/false);
-            
+           
     // Case 1 Const String
     if (param->dataType == CONST_STRING_TYPE) {
+        SymbolTableEntry* symbol = gencode_retrieveSymbol(param->semantic_value.identifierSemanticValue.identifierName,/*onlyInCurrentScope*/false);
+
         if (!strcmp(param->semantic_value.const1->const_u.sc, "\"\\n\"")) {
             fprintf(FP, "la      t0,_endline\n");
             fprintf(FP, "mv      a0,t0\n");
@@ -1044,94 +1185,55 @@ void gencode_write(AST_NODE* functionCallNode){
         return;
     }
     
-    if (symbol == NULL) {
-        fprintf(stderr, "write function Error QQ\n");
-        exit(255);
-    } else if (symbol->attribute->attr.typeDescriptor->kind == ARRAY_TYPE_DESCRIPTOR) {
-        // TODO
+    dataType = gencode_RelopExpr(param);
+    /*
+    if (symbol->attribute->attr.typeDescriptor->kind == ARRAY_TYPE_DESCRIPTOR) {
         int reg_place;
-        DATA_TYPE element_type = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType;
-        const int const *dimension_size = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.sizeInEachDimension;
-        int now_dimension = 1;
-        AST_NODE *expr = param->child;
-        int reference_offset = get_register(true, false);
-
-        gencode_RelopExpr(expr);
-        fprintf(FP, "mv     %s,%s\n", regmap[reference_offset], regmap[expr->reg_place]);
-        free_register(expr->reg_place);
-        for (expr = expr->rightSibling; expr != NULL; expr = expr->rightSibling, ++now_dimension) {
-            gencode_RelopExpr(expr);
-            fprintf(FP, "mul    %1$s,%1$s,%2$d\n", regmap[reference_offset], dimension_size[now_dimension]);
-            fprintf(FP, "add    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[expr->reg_place]);
-            free_register(expr->reg_place);
+        int reg_array = get_array_reference(param, symbol);
+        if (symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType == INT_TYPE) {
+            reg_place = get_register(true, false);
+            fprintf(FP, "lw     %s,0(%s)\n", regmap[reg_place], regmap[reg_array]);
+            fprintf(FP, "mv     a0,%s\n", regmap[reg_place]);
+            free_register(reg_place);
+            fprintf(FP, "jal     _write_int\n");
+        } else {
+            reg_place = get_register(false, false);
+            fprintf(FP, "flw     %s,0(%s)\n", regmap[reg_place], regmap[reg_array]);
+            fprintf(FP, "fmv.s  fa0,%s\n", regmap[reg_place]);
+            free_register(reg_place);
+            fprintf(FP, "jal     _write_float\n");
         }
-        fprintf(FP, "slli   %1$s,%1$s,2\n", regmap[reference_offset]);
-        if (symbol->global == true) {    // global global
-            fprintf(FP, "la      s11,_g_%d\n", symbol->offset);
-            fprintf(FP, "add    %1$s,%1$s,s11\n", regmap[reference_offset]);
-            if (symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType == INT_TYPE) {
-                fprintf(FP, "lw      t0,0(%s)\n", regmap[reference_offset]);
-                fprintf(FP, "mv     a0,t0\n");
-                fprintf(FP, "jal     _write_int\n");
-            } else {    
-                fprintf(FP, "flw     ft0,0(%s)\n", regmap[reference_offset]);
-                fprintf(FP, "fmv.s  fa0,ft0\n");
-                fprintf(FP, "jal     _write_float\n");
-            }
-        } else {                        // local local
-            fprintf(FP, "add      %1$s,%1$s,sp\n", regmap[reference_offset]);
-            fprintf(FP, "addi   %1$s,%1$s,%2$d\n", regmap[reference_offset], symbol->offset);
-            if (symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType == INT_TYPE) {
-                fprintf(FP, "lw     t0,0(%s)\n", regmap[reference_offset]);
-                fprintf(FP, "mv     a0,t0\n");
-                fprintf(FP, "jal     _write_int\n");
-            } else {
-                fprintf(FP, "flw     ft0,0(%s)\n", regmap[reference_offset]);
-                fprintf(FP, "fmv.s  fa0,ft0\n");
-                fprintf(FP, "jal     _write_float\n");
-            }
-        }
-        free_register(reference_offset);
+        free_register(reg_array);
         return;
     }
-    
-    switch (symbol->attribute->attr.typeDescriptor->properties.dataType) {
-        // Case 3 INT
+    */
+    switch(dataType) {
+        // Case 2 INT
         case INT_TYPE:
-            if (symbol->global == true) {
-                fprintf(FP, "la      s11,_g_%d\n",symbol->offset);
-                fprintf(FP, "lw      t0,0(s11)\n");
-                fprintf(FP, "mv      a0,t0\n");
-                fprintf(FP, "jal     _write_int\n");
-            } else {
-                fprintf(FP, "lw      t0,%d(sp)\n",symbol->offset);
-                fprintf(FP, "mv      a0,t0\n");
-                fprintf(FP, "jal     _write_int\n");
-            }
+            fprintf(FP, "mv      a0,%s\n", regmap[param->reg_place]);
+            fprintf(FP, "jal     _write_int\n");
             break;
-        // Case 4 FLOAT
+        // Case 3 FLOAT
         case FLOAT_TYPE:
-            if (symbol->global == true) {
-                fprintf(FP, "la      s11,_g_%d\n",symbol->offset);
-                fprintf(FP, "flw     ft0,0(s11)\n");
-                fprintf(FP, "fmv.s   fa0,ft0\n");
-                fprintf(FP, "jal     _write_float\n");
-            } else {
-                fprintf(FP, "flw     ft0,%d(sp)\n",symbol->offset);
-                fprintf(FP, "fmv.s   fa0,ft0\n");
-                fprintf(FP, "jal     _write_float\n");
-            }
-            
+            fprintf(FP, "fmv.s   fa0,%s\n", regmap[param->reg_place]);
+            fprintf(FP, "jal     _write_float\n");
             break;
         default:
             fprintf(stderr, "gencodewrite Error %d\n",param->dataType);
             exit(255);
     }
+    free_register(param->reg_place);
 }
 
 
 void init_register(){
     memset(reg_arr,0,sizeof(reg_arr));
+}
+
+void clear_parameter_register() {
+    for (int i = 39; i < 51; ++i) {
+        reg_arr[i] = false;
+    }
 }
 
 int get_register(bool getint, bool parameter){
