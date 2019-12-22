@@ -104,10 +104,12 @@ typedef struct STMTSemanticValue
     STMT_KIND kind;
 } STMTSemanticValue;
 
+// use isConstEval to store the data type of constEvalValue (it is of type "C_type").
+// if it is not evaluated, isConstEval will be -1
 typedef struct EXPRSemanticValue
 {
     EXPR_KIND kind;
-    
+     
     int isConstEval;
 
     union

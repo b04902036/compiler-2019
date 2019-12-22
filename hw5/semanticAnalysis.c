@@ -306,7 +306,6 @@ void processProgramNode(AST_NODE *programNode) {
                 exit(255);
         }
     }
-    fprintf(stderr, "finish processing program node\n"); 
     
     // added, close a scope for global declaration
     closeScope();   
@@ -542,8 +541,8 @@ void declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray, 
                 
                 /**
                  * set array dimension information
-                 *  we don't care about array size in each dimension in this hw
-                 *  only need to check
+                 *  we DO care about array size in each dimension in this hw
+                 *  also need to check
                  *   1. NULL (e.g. int a[][10];) is not allowed when declaring
                  *   2. float (e.g. int a[10-0.3];) is not allowed when declaring
                  */
@@ -561,6 +560,12 @@ void declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray, 
                     else if ((arrayDimension->nodeType == CONST_VALUE_NODE) &&
                                 arrayDimension->semantic_value.const1->const_type == FLOATC) {
                         printErrorMsg(arrayDimension, ARRAY_SIZE_NOT_INT);
+                    }
+                    else if (arrayDimension->nodeType == CONST_VALUE_NODE) {
+                        symbol->attribute->attr.typeDescriptor->properties.arrayProperties.sizeInEachDimension[idx] = arrayDimension->semantic_value.const1->const_u.intval;
+                    }
+                    else {
+                        symbol->attribute->attr.typeDescriptor->properties.arrayProperties.sizeInEachDimension[idx] = arrayDimension->semantic_value.exprSemanticValue.constEvalValue.iValue;
                     }
                 }
                 symbol->attribute->attr.typeDescriptor->properties.arrayProperties.dimension = idx;
@@ -580,6 +585,13 @@ void declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionOfArray, 
             default:
                 fprintf(stderr, "[PARSER ERROR] no such kind of IdentifierSemanticValue\n");
         } // switch, variable type
+
+        /**
+         * if it is function parameter, we will record it for further usage
+         */
+        if (ignoreFirstDimensionOfArray) {
+            symbol->isFunctionParameter = true;
+        }
 
         /**
          * now symbolTableEntry is ready

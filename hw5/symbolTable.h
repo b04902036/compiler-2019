@@ -86,6 +86,8 @@ typedef struct SymbolTableEntry
 
 	bool global;
 	int offset;
+    
+    bool isFunctionParameter;
 	//int regnum;
 	//bool dirty;
 } SymbolTableEntry;
@@ -104,6 +106,7 @@ typedef struct SymbolTable
     int totalHashTableCount;
 
     int allocatedTotalScopeCount;
+
     //int totalScopeCount;
 } SymbolTable;
 

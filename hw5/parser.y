@@ -107,6 +107,324 @@ static inline AST_NODE* makeExprNode(EXPR_KIND exprKind, int operationEnumValue)
     return exprNode;                        
 }
 
+static void evaluate(AST_NODE *left, AST_NODE *right, AST_NODE *destination, BINARY_OPERATOR op) {
+    int iFinalValue;
+    float fFinalValue;
+    int resultIsInt = 1;
+    if (left->nodeType == CONST_VALUE_NODE && right->nodeType == CONST_VALUE_NODE) {
+        if (left->semantic_value.const1->const_type == INTEGERC && 
+                right->semantic_value.const1->const_type == INTEGERC) {
+            int leftValue = left->semantic_value.const1->const_u.intval;
+            int rightValue = right->semantic_value.const1->const_u.intval;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    iFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    iFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    iFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    resultIsInt = 0;
+                    break;
+            }
+        } else if (left->semantic_value.const1->const_type == INTEGERC) {
+            int leftValue = left->semantic_value.const1->const_u.intval;
+            float rightValue = right->semantic_value.const1->const_u.fval;
+            resultIsInt = 0;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    fFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    fFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    fFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    break;        
+            }
+        } else if (left->semantic_value.const1->const_type == FLOATC &&
+                right->semantic_value.const1->const_type == FLOATC) {
+            float leftValue = left->semantic_value.const1->const_u.fval;
+            float rightValue = right->semantic_value.const1->const_u.fval;
+            resultIsInt = 0;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    fFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    fFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    fFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    break; 
+            }
+        } else {
+            float leftValue = left->semantic_value.const1->const_u.fval;
+            int rightValue = right->semantic_value.const1->const_u.intval;
+            resultIsInt = 0;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    fFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    fFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    fFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    break; 
+            }
+        }
+    } else if (left->nodeType == CONST_VALUE_NODE) {
+        if (left->semantic_value.const1->const_type == INTEGERC && 
+                right->semantic_value.exprSemanticValue.isConstEval == INTEGERC) {
+            int leftValue = left->semantic_value.const1->const_u.intval;
+            int rightValue = right->semantic_value.exprSemanticValue.constEvalValue.iValue;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    iFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    iFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    iFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    resultIsInt = 0;
+                    break;
+            }
+        } else if (left->semantic_value.const1->const_type == INTEGERC) {
+            int leftValue = left->semantic_value.const1->const_u.intval;
+            float rightValue = right->semantic_value.exprSemanticValue.constEvalValue.fValue;
+            resultIsInt = 0;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    fFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    fFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    fFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    break; 
+            }
+        } else if (left->semantic_value.const1->const_type == FLOATC &&
+                right->semantic_value.exprSemanticValue.isConstEval == FLOATC) {
+            float leftValue = left->semantic_value.const1->const_u.fval;
+            float rightValue = right->semantic_value.exprSemanticValue.constEvalValue.fValue;
+            resultIsInt = 0;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    fFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    fFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    fFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    break; 
+            }
+        } else {
+            float leftValue = left->semantic_value.const1->const_u.fval;
+            int rightValue = right->semantic_value.exprSemanticValue.constEvalValue.iValue;
+            resultIsInt = 0;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    fFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    fFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    fFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    break; 
+            }
+        }
+    } else if (left->nodeType == EXPR_NODE && right->nodeType == CONST_VALUE_NODE) {
+        if (left->semantic_value.exprSemanticValue.isConstEval == INTEGERC && 
+                right->semantic_value.const1->const_type == INTEGERC) {
+            int leftValue = left->semantic_value.exprSemanticValue.constEvalValue.iValue;
+            int rightValue = right->semantic_value.const1->const_u.intval;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    iFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    iFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    iFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    resultIsInt = 0;
+                    break;
+            }
+        } else if (left->semantic_value.exprSemanticValue.isConstEval == INTEGERC) {
+            int leftValue = left->semantic_value.exprSemanticValue.constEvalValue.iValue;
+            float rightValue = right->semantic_value.const1->const_u.fval;
+            resultIsInt = 0;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    fFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    fFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    fFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    break; 
+            }
+        } else if (left->semantic_value.exprSemanticValue.isConstEval == FLOATC &&
+                right->semantic_value.const1->const_type == FLOATC) {
+            float leftValue = left->semantic_value.exprSemanticValue.constEvalValue.fValue;
+            float rightValue = right->semantic_value.const1->const_u.fval;
+            resultIsInt = 0;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    fFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    fFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    fFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    break; 
+            }
+        } else {
+            float leftValue = left->semantic_value.exprSemanticValue.constEvalValue.fValue;
+            int rightValue = right->semantic_value.const1->const_u.intval;
+            resultIsInt = 0;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    fFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    fFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    fFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    break; 
+            }
+        }
+    } else {
+        if (left->semantic_value.exprSemanticValue.isConstEval == INTEGERC && 
+                right->semantic_value.exprSemanticValue.isConstEval == INTEGERC) {
+            int leftValue = left->semantic_value.exprSemanticValue.constEvalValue.iValue;
+            int rightValue = right->semantic_value.exprSemanticValue.constEvalValue.iValue;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    iFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    iFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    iFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    resultIsInt = 0;
+                    break;
+            }
+        } else if (left->semantic_value.exprSemanticValue.isConstEval == INTEGERC) {
+            int leftValue = left->semantic_value.exprSemanticValue.constEvalValue.iValue;
+            float rightValue = right->semantic_value.exprSemanticValue.constEvalValue.fValue;
+            resultIsInt = 0;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    fFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    fFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    fFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    break; 
+            }
+        } else if (left->semantic_value.exprSemanticValue.isConstEval == FLOATC &&
+                right->semantic_value.exprSemanticValue.isConstEval == FLOATC) {
+            float leftValue = left->semantic_value.exprSemanticValue.constEvalValue.fValue;
+            float rightValue = right->semantic_value.exprSemanticValue.constEvalValue.fValue;
+            resultIsInt = 0;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    fFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    fFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    fFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    break; 
+            }
+        } else {
+            float leftValue = left->semantic_value.exprSemanticValue.constEvalValue.fValue;
+            int rightValue = right->semantic_value.exprSemanticValue.constEvalValue.iValue;
+            resultIsInt = 0;
+            switch (op) {
+                case BINARY_OP_ADD:
+                    fFinalValue = leftValue + rightValue;
+                    break;
+                case BINARY_OP_SUB:
+                    fFinalValue = leftValue - rightValue;
+                    break;
+                case BINARY_OP_MUL:
+                    fFinalValue = leftValue * rightValue;
+                    break;
+                case BINARY_OP_DIV:
+                    fFinalValue = 1.0 * leftValue / rightValue;
+                    break; 
+            }
+        }
+    }
+    if (resultIsInt) {
+        destination->semantic_value.exprSemanticValue.isConstEval = INTEGERC;
+        destination->semantic_value.exprSemanticValue.constEvalValue.iValue = iFinalValue;
+    } else {
+        destination->semantic_value.exprSemanticValue.isConstEval = FLOATC;
+        destination->semantic_value.exprSemanticValue.constEvalValue.fValue = fFinalValue;
+    }
+}
+
 %}
 
 
@@ -390,26 +708,34 @@ cexpr		: cexpr OP_PLUS mcexpr
                 {
                     $$ = makeExprNode(BINARY_OPERATION, BINARY_OP_ADD);
                     makeFamily($$, 2, $1, $3);
+                    evaluate($1, $3, $$, BINARY_OP_ADD);
                 } 
             | cexpr OP_MINUS mcexpr
                 {
                     $$ = makeExprNode(BINARY_OPERATION, BINARY_OP_SUB);
                     makeFamily($$, 2, $1, $3);
+                    evaluate($1, $3, $$, BINARY_OP_SUB);
                 } 
             | mcexpr 
                 {
                     $$ = $1;
                 }
             ;  
+/**
+ * if the AST_NODE is CONST, then we can get the value from node->semantic_value.const1->const_u
+ * otherwise it should be EXPR_NODE, then we can get the value from node->semantic_value.exprSemanticValue.constEvalValue
+ */
 mcexpr		: mcexpr OP_TIMES cfactor 
                 {
                     $$ = makeExprNode(BINARY_OPERATION, BINARY_OP_MUL);
                     makeFamily($$, 2, $1, $3);
+                    evaluate($1, $3, $$, BINARY_OP_MUL);
                 }
             | mcexpr OP_DIVIDE cfactor 
                 {
                     $$ = makeExprNode(BINARY_OPERATION, BINARY_OP_DIV);
                     makeFamily($$, 2, $1, $3);
+                    evaluate($1, $3, $$, BINARY_OP_DIV);
                 }
             | cfactor 
                 {

@@ -25,6 +25,7 @@ SymbolTableEntry* newSymbolTableEntry()
     symbolTableEntry->sameNameInOuterLevel = NULL;
     symbolTableEntry->attribute = NULL;
     symbolTableEntry->name = NULL;
+    symbolTableEntry->isFunctionParameter = false;
     symbolTableEntry->nestingLevel = symbolTable.currentLevel;
     return symbolTableEntry;
 }
