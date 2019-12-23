@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-
+#include <stdbool.h>
 
 
 typedef enum DATA_TYPE
@@ -164,7 +164,10 @@ struct AST_NODE {
     DATA_TYPE dataType;
 	
 	int reg_place;
-	
+    // this is only used when passing a parameter array pointer to another function
+    int sign_place;
+    bool is_sign_place_inuse;
+
 	int linenumber;
 	union {
         IdentifierSemanticValue identifierSemanticValue;
