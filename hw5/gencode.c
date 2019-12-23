@@ -21,25 +21,25 @@
 #include <stdio.h>
 #include <string.h>
 
-#define put_int_on_stack(reg_name, function_name) do { \
+#define put_int_on_stack(offset, reg_name, function_name) do { \
     param_on_stack_offset += 8; \
     int _reg_place; \
     _reg_place = get_register(true, false); \
     fprintf(FP, "la     %s,_paramSize_%s\n", regmap[_reg_place], function_name); \
     fprintf(FP, "lw     %1$s,0(%1$s)\n", regmap[_reg_place]); \
     fprintf(FP, "sub    %1$s,sp,%1$s\n", regmap[_reg_place]); \
-    fprintf(FP, "sd     %s,%d(%s)\n", reg_name, param_on_stack_offset, regmap[_reg_place]); \
+    fprintf(FP, "sd     %s,%d(%s)\n", reg_name, param_on_stack_offset + offset, regmap[_reg_place]); \
     free_register(_reg_place); \
 } while (0);
 
-#define put_float_on_stack(reg_name, function_name) do { \
+#define put_float_on_stack(offset, reg_name, function_name) do { \
     param_on_stack_offset += 8; \
     int _reg_place; \
     _reg_place = get_register(true, false); \
     fprintf(FP, "la     %s,_paramSize_%s\n", regmap[_reg_place], function_name); \
     fprintf(FP, "lw     %1$s,0(%1$s)\n", regmap[_reg_place]); \
     fprintf(FP, "sub    %1$s,sp,%1$s\n", regmap[_reg_place]); \
-    fprintf(FP, "fsd     %s,%d(%s)\n", reg_name, param_on_stack_offset, regmap[_reg_place]); \
+    fprintf(FP, "fsd     %s,%d(%s)\n", reg_name, param_on_stack_offset + offset, regmap[_reg_place]); \
     free_register(_reg_place); \
 } while (0);
 
@@ -59,6 +59,7 @@ int controlid = 0;
 int global_offset = 0;
 int frame_offset = 0;
 int param_on_stack_offset = 0;
+int branch_count = 0;
 bool global_variable_declaration = true;
 
 void gencode(AST_NODE* node);
@@ -96,7 +97,7 @@ void gencode_fread(AST_NODE* idNode);
 void gencode_write(AST_NODE* functionCallNode);
 
 void clear_parameter_register();
-int get_array_reference(AST_NODE *array, SymbolTableEntry *symbol);
+void get_array_reference(AST_NODE *array, SymbolTableEntry *symbol);
 
 // I assume that no (a1+(a2+(a3+(a4+(a5+(...))))))
 // Only need in expression in function, store at those ast nodes.
@@ -211,6 +212,10 @@ void gencode_ExprNode(AST_NODE* exprNode){  // reuse register
                 free_register(right->sign_place);
                 right->is_sign_place_inuse = false;
             }
+            if (left->is_sign_place_inuse) {
+                free_register(left->sign_place);
+                left->is_sign_place_inuse = false;
+            }
             exprNode->reg_place = left->reg_place;
             switch (exprNode->semantic_value.exprSemanticValue.op.binaryOp) {
                 case BINARY_OP_ADD:
@@ -255,6 +260,11 @@ void gencode_ExprNode(AST_NODE* exprNode){  // reuse register
                 free_register(right->sign_place);
                 right->is_sign_place_inuse = false;
             }
+            if (left->is_sign_place_inuse) {
+                free_register(left->sign_place);
+                left->is_sign_place_inuse = false;
+            }
+
             exprNode->reg_place = left->reg_place;
             switch (exprNode->semantic_value.exprSemanticValue.op.binaryOp) {
                 case BINARY_OP_ADD:
@@ -296,7 +306,11 @@ void gencode_ExprNode(AST_NODE* exprNode){  // reuse register
     } else if (exprNode->semantic_value.exprSemanticValue.kind == UNARY_OPERATION) {
         AST_NODE *child = exprNode->child;
         dataType1 = gencode_RelopExpr(child);
-        
+        if (child->is_sign_place_inuse) {
+            free_register(child->sign_place);
+            child->is_sign_place_inuse = false;
+        }
+       
         if (dataType1 == FLOAT_TYPE) {
             const char *regchild = regmap[child->reg_place];
             exprNode->reg_place = child->reg_place;
@@ -386,11 +400,16 @@ void gencode_VariableRValue(AST_NODE* idNode){
         bool is_pointer = false;
 
         sign_reg = get_register(true, false);
-        idNode->reg_place = sign_reg;
+        idNode->sign_place = sign_reg;
         idNode->is_sign_place_inuse = true;
 
         // special case, we simply pass the array pointer itself
         if (expr == NULL) {
+            if (element_type == INT_TYPE) {
+                idNode->dataType = INT_PTR_TYPE;
+            } else {
+                idNode->dataType = FLOAT_PTR_TYPE;
+            }
             if (symbol->global == true) {    // global global
                 reg_place = get_register(true, false);
                 idNode->reg_place = reg_place;
@@ -407,12 +426,11 @@ void gencode_VariableRValue(AST_NODE* idNode){
                     // 8 bytes sign + 8 bytes pointer on current stack frame
                     reg_place = get_register(true, false);
                     fprintf(FP, "li     %s,0\n", regmap[reference_offset]);
-                    fprintf(FP, "ld    %s,%d(sp)\n", regmap[reg_place], symbol->offset);
-                    fprintf(FP, "add    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
                     // first 8 bytes is sign (int or float array pointer)
-                    fprintf(FP, "ld     %s,0(%s)\n", regmap[sign_reg], regmap[reference_offset]);
+                    fprintf(FP, "ld     %s,%d(sp)\n", regmap[sign_reg], symbol->offset);
                     // next 8 bytes is pointer
-                    fprintf(FP, "addi   %1$s,%1$s,8\n", regmap[reference_offset]);
+                    fprintf(FP, "ld    %s,%d(sp)\n", regmap[reg_place], symbol->offset + 8);
+                    fprintf(FP, "add    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
                     free_register(reg_place);
                 } else {
                     // otherwise it is simply an array in current stack frame
@@ -493,10 +511,12 @@ void gencode_VariableRValue(AST_NODE* idNode){
                     fprintf(FP, "li     %s,1\n", regmap[sign_reg]);
                 }
             } else if (symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType == INT_TYPE) {
+                idNode->dataType = INT_TYPE;
                 reg_place = get_register(true, false);
                 idNode->reg_place = reg_place;
                 fprintf(FP, "lw      %s,0(%s)\n", regmap[reg_place], regmap[reference_offset]);
             } else {    
+                idNode->dataType = FLOAT_TYPE;
                 reg_place = get_register(false, false);
                 idNode->reg_place = reg_place;
                 fprintf(FP, "flw     %s,0(%s)\n", regmap[reg_place], regmap[reference_offset]);
@@ -505,12 +525,11 @@ void gencode_VariableRValue(AST_NODE* idNode){
             if (symbol->isFunctionParameter) {
                 // if it is function parameter, then it will be stored as a pointer on current stack frame
                 reg_place = get_register(true, false);
-                fprintf(FP, "ld    %s,%d(sp)\n", regmap[reg_place], symbol->offset);
-                fprintf(FP, "add    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
                 // first 8 bytes is sign (int or float array pointer)
-                fprintf(FP, "ld     %s,0(%s)\n", regmap[sign_reg], regmap[reference_offset]);
+                fprintf(FP, "ld     %s,%d(sp)\n", regmap[sign_reg], symbol->offset);
                 // next 8 bytes is pointer
-                fprintf(FP, "addi   %1$s,%1$s,8\n", regmap[reference_offset]);
+                fprintf(FP, "ld    %s,%d(sp)\n", regmap[reg_place], symbol->offset + 8);
+                fprintf(FP, "add    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
                 free_register(reg_place);
             } else {
                 // otherwise it is simply an array in current stack frame
@@ -519,25 +538,55 @@ void gencode_VariableRValue(AST_NODE* idNode){
                 fprintf(FP, "li     %s,%d\n", regmap[reg_place], symbol->offset);
                 fprintf(FP, "add   %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
                 free_register(reg_place);
-            }
 
-            if (is_pointer) {
-                reg_place = get_register(true, false);
-                idNode->reg_place = reg_place;
                 if (element_type == INT_TYPE) {
                     fprintf(FP, "li     %s,0\n", regmap[sign_reg]);
                 } else {
                     fprintf(FP, "li     %s,1\n", regmap[sign_reg]);
                 }
-                fprintf(FP, "mv     %s,%s\n", regmap[reg_place], regmap[reference_offset]);
-            } else if (symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType == INT_TYPE) {
+            }
+
+            if (is_pointer) {
                 reg_place = get_register(true, false);
                 idNode->reg_place = reg_place;
-                fprintf(FP, "lw     %s,0(%s)\n", regmap[reg_place], regmap[reference_offset]);
+                fprintf(FP, "mv     %s,%s\n", regmap[reg_place], regmap[reference_offset]);
+            } else if (symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType == INT_TYPE) {
+                idNode->dataType = INT_TYPE;
+                if (symbol->isFunctionParameter) {
+                    reg_place = get_register(false, true);
+                    idNode->reg_place = reg_place;
+                    fprintf(FP, "beqz   %s,_arrayReference%d\n", regmap[sign_reg], branch_count);
+                    fprintf(FP, "flw     %s,0(%s)\n", regmap[reg_place], regmap[reference_offset]);
+                    float_2_int(idNode);
+                    fprintf(FP, "j _arrayReference%d\n", branch_count + 1);
+                    fprintf(FP, "_arrayReference%d:\n", branch_count);
+                    fprintf(FP, "lw     %s,0(%s)\n", regmap[idNode->reg_place], regmap[reference_offset]);
+                    fprintf(FP, "_arrayReference%d:\n", branch_count + 1);
+                    branch_count += 2;
+                } else {
+                    reg_place = get_register(true, false);
+                    idNode->reg_place = reg_place;
+                    fprintf(FP, "lw     %s,0(%s)\n", regmap[reg_place], regmap[reference_offset]);
+                }
             } else {
-                reg_place = get_register(false, false);
-                idNode->reg_place = reg_place;
-                fprintf(FP, "flw     %s,0(%s)\n", regmap[reg_place], regmap[reference_offset]);
+                idNode->dataType = FLOAT_TYPE;
+                if (symbol->isFunctionParameter) {
+                    reg_place = get_register(true, false);
+                    idNode->reg_place = reg_place;
+                    fprintf(FP, "addi   %1$s,%1$s,-1\n", regmap[sign_reg]);
+                    fprintf(FP, "beqz   %s,_arrayReference%d\n", regmap[sign_reg], branch_count);
+                    fprintf(FP, "lw     %s,0(%s)\n", regmap[reg_place], regmap[reference_offset]);
+                    int_2_float(idNode);// __jason
+                    fprintf(FP, "j _arrayReference%d\n", branch_count + 1);
+                    fprintf(FP, "_arrayReference%d:\n", branch_count);
+                    fprintf(FP, "flw    %s,0(%s)\n", regmap[idNode->reg_place], regmap[reference_offset]);
+                    fprintf(FP, "_arrayReference%d:\n", branch_count + 1);
+                    branch_count += 2;
+                } else {
+                    reg_place = get_register(false, false);
+                    idNode->reg_place = reg_place;
+                    fprintf(FP, "flw     %s,0(%s)\n", regmap[reg_place], regmap[reference_offset]);
+                }
             }
         }
         free_register(reference_offset);
@@ -667,7 +716,7 @@ void gencode_declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionO
                             } else {
                                 fprintf(FP, "mv     %s,%s\n", regmap[tmp_reg], regmap[reg_place]);
                             }
-                            fprintf(FP, "sw     %s,%d(sp)\n", regmap[tmp_reg], frame_offset);
+                            fprintf(FP, "sd     %s,%d(sp)\n", regmap[tmp_reg], frame_offset);
                             free_register(tmp_reg);
                             frame_offset += 8;
 
@@ -843,7 +892,7 @@ void gencode_FunctionCall(AST_NODE* functionCallNode){
     AST_NODE* paramList = functionName->rightSibling;
     SymbolTableEntry *symbol;
     int reg_place;
-    param_on_stack_offset = -8;
+    param_on_stack_offset = 0;
 
     // Special case : write ( I put read into gencode_assignment )
     if (strcmp(functionName->semantic_value.identifierSemanticValue.identifierName, "write") == 0) {
@@ -864,7 +913,13 @@ void gencode_FunctionCall(AST_NODE* functionCallNode){
         DATA_TYPE param_type;
         Parameter *expect_param = symbol->attribute->attr.functionSignature->parameterList;
         
-        caller_store();
+
+        // check how many register we are going to do when calling caller_store
+        int num = 0;
+        for (int i=0; i<=50; i++) {
+            if (reg_arr[i]==true)    num++;
+        }
+        num *= -8;
 
         // first do type checking and convert if necessary
         // then store parameter into (f)a[2-7] register
@@ -874,7 +929,7 @@ void gencode_FunctionCall(AST_NODE* functionCallNode){
                 int_2_float(param);
                 reg_place = get_register(false, true);
                 if (reg_place == -1) {
-                    put_float_on_stack(regmap[param->reg_place], symbol->name);
+                    put_float_on_stack(num, regmap[param->reg_place], symbol->name);
                 } else {
                     fprintf(FP, "fmv.s    %s,%s\n", regmap[reg_place], regmap[param->reg_place]);
                 }
@@ -882,21 +937,21 @@ void gencode_FunctionCall(AST_NODE* functionCallNode){
                 float_2_int(param);
                 reg_place = get_register(true, true);
                 if (reg_place == -1) {
-                    put_int_on_stack(regmap[param->reg_place], symbol->name);
+                    put_int_on_stack(num, regmap[param->reg_place], symbol->name);
                 } else {
                     fprintf(FP, "mv     %s,%s\n", regmap[reg_place], regmap[param->reg_place]);
                 }
             } else if (param_type == INT_TYPE) {
                 reg_place = get_register(true, true);
                 if (reg_place == -1) {
-                    put_int_on_stack(regmap[param->reg_place], symbol->name);
+                    put_int_on_stack(num, regmap[param->reg_place], symbol->name);
                 } else {
                     fprintf(FP, "mv     %s,%s\n", regmap[reg_place], regmap[param->reg_place]);
                 }
             } else if (param_type == FLOAT_TYPE) {
                 reg_place = get_register(false, true);
                 if (reg_place == -1) {
-                    put_float_on_stack(regmap[param->reg_place], symbol->name);
+                    put_float_on_stack(num, regmap[param->reg_place], symbol->name);
                 } else {
                     fprintf(FP, "fmv.s    %s,%s\n", regmap[reg_place], regmap[param->reg_place]);
                 }
@@ -906,14 +961,14 @@ void gencode_FunctionCall(AST_NODE* functionCallNode){
             } else if (param_type == INT_PTR_TYPE || param_type == FLOAT_PTR_TYPE) {
                 reg_place = get_register(true, true);
                 if (reg_place == -1) {
-                    put_int_on_stack(regmap[param->sign_place], symbol->name);
+                    put_int_on_stack(num, regmap[param->sign_place], symbol->name);
                 } else {
                     fprintf(FP, "mv     %s,%s\n", regmap[reg_place], regmap[param->sign_place]);
                 }
 
                 reg_place = get_register(true, true);
                 if (reg_place == -1) {
-                    put_int_on_stack(regmap[param->reg_place], symbol->name);
+                    put_int_on_stack(num, regmap[param->reg_place], symbol->name);
                 } else {
                     fprintf(FP, "mv     %s,%s\n", regmap[reg_place], regmap[param->reg_place]);
                 }
@@ -929,6 +984,7 @@ void gencode_FunctionCall(AST_NODE* functionCallNode){
         }
 
         clear_parameter_register();
+        caller_store();
         reg_place = get_register(true, false);
         fprintf(FP, "la     %s,_paramSize_%s\n", regmap[reg_place], symbol->name);
         fprintf(FP, "lw     %1$s,0(%1$s)\n", regmap[reg_place]);
@@ -942,7 +998,8 @@ void gencode_FunctionCall(AST_NODE* functionCallNode){
     }
     
     // Put Return Value
-    if (functionCallNode->dataType == INT_TYPE) {    // int
+    DATA_TYPE return_type = symbol->attribute->attr.functionSignature->returnType;
+    if (return_type == INT_TYPE) {    // int
         reg_place = get_register(true, false);
         functionCallNode->reg_place = reg_place;
         fprintf(FP, "mv      %s,a0\n", regmap[reg_place]);
@@ -951,6 +1008,7 @@ void gencode_FunctionCall(AST_NODE* functionCallNode){
         functionCallNode->reg_place = reg_place;
         fprintf(FP, "fmv.s   %s,fa0\n", regmap[reg_place]);
     }
+    functionCallNode->dataType = return_type;
     return;
 }
 
@@ -977,13 +1035,11 @@ void gencode_AssignmentStmt(AST_NODE* assignmentNode){
     
     // Right Right Right Handside   --  relop_expr , if "a = b" and a's type mismatch b's
     gencode_RelopExpr(relop_expr);
-    
-    if (var_ref->dataType == INT_TYPE && relop_expr->dataType == FLOAT_TYPE) {
-        float_2_int(relop_expr);
-    } else if (var_ref->dataType == FLOAT_TYPE && relop_expr->dataType == INT_TYPE) {
-        int_2_float(relop_expr);
-    }
-    
+    if (relop_expr->is_sign_place_inuse) {
+        free_register(relop_expr->sign_place);
+        relop_expr->is_sign_place_inuse = false;
+    } 
+   
     // Left Left Left Handside  --  var_ref
     SymbolTableEntry *symbol = retrieveSymbol(var_ref->semantic_value.identifierSemanticValue.identifierName, /*onlyInCurrentScope*/false);
     if (symbol==NULL) {
@@ -992,6 +1048,13 @@ void gencode_AssignmentStmt(AST_NODE* assignmentNode){
     }
     
     if (symbol->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR) {
+        if (symbol->attribute->attr.typeDescriptor->properties.dataType == INT_TYPE && relop_expr->dataType == FLOAT_TYPE) {
+            var_ref->dataType = INT_TYPE;
+            float_2_int(relop_expr);
+        } else if (symbol->attribute->attr.typeDescriptor->properties.dataType == FLOAT_TYPE && relop_expr->dataType == INT_TYPE) {
+            var_ref->dataType = FLOAT_TYPE;
+            int_2_float(relop_expr);
+        } 
         if (symbol->global == true) {    // global
             check_s11();
             if(var_ref->dataType == INT_TYPE) {
@@ -1012,8 +1075,9 @@ void gencode_AssignmentStmt(AST_NODE* assignmentNode){
         // free_register(relop_expr->reg_place);
         assignmentNode->reg_place = relop_expr->reg_place;
     }
-    else {  // Array Element    
+    else {  // Array Element 
         int reg_place;
+        /*
         DATA_TYPE element_type = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType;
         const int const *dimension_size = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.sizeInEachDimension;
         int now_dimension = 1;
@@ -1063,8 +1127,37 @@ void gencode_AssignmentStmt(AST_NODE* assignmentNode){
                 fprintf(FP, "fsw     %s,0(%s)\n", regmap[relop_expr->reg_place], regmap[reference_offset]);
             }
         }
+        */
+        get_array_reference(var_ref, symbol);
+        if (relop_expr->dataType == INT_TYPE) {
+            reg_place = relop_expr->reg_place;
+            fprintf(FP, "beqz   %s,_arrayReference%d\n", regmap[var_ref->sign_place], branch_count);
+            int_2_float(relop_expr);
+            fprintf(FP, "fsw    %s,0(%s)\n", regmap[relop_expr->reg_place], regmap[var_ref->reg_place]);
+            fprintf(FP, "j  _arrayReference%d\n", branch_count + 1);
+            fprintf(FP, "_arrayReference%d:\n", branch_count);
+            fprintf(FP, "sw     %s,0(%s)\n", regmap[reg_place], regmap[var_ref->reg_place]);
+            fprintf(FP, "_arrayReference%d:\n", branch_count + 1);
+            branch_count += 2;
+        } else {
+            reg_place = relop_expr->reg_place;
+            fprintf(FP, "addi   %1$s,%1$s,-1\n", regmap[var_ref->sign_place]);
+            fprintf(FP, "beqz   %s,_arrayReference%d\n", regmap[var_ref->sign_place], branch_count);
+            float_2_int(relop_expr);
+            fprintf(FP, "sw    %s,0(%s)\n", regmap[relop_expr->reg_place], regmap[var_ref->reg_place]);
+            fprintf(FP, "j  _arrayReference%d\n", branch_count + 1);
+            fprintf(FP, "_arrayReference%d:\n", branch_count);
+            fprintf(FP, "fsw     %s,0(%s)\n", regmap[reg_place], regmap[var_ref->reg_place]);
+            fprintf(FP, "_arrayReference%d:\n", branch_count + 1);
+            branch_count += 2;
+        }
         assignmentNode->reg_place = relop_expr->reg_place;
-        free_register(reference_offset);
+        free_register(var_ref->reg_place);
+        if (var_ref->is_sign_place_inuse) {
+            free_register(var_ref->sign_place);
+            var_ref->is_sign_place_inuse = false;
+        }
+        free_register(relop_expr->reg_place);
     }
 
 }
@@ -1238,7 +1331,7 @@ void gencode_epilogue(char *name){
     fprintf(FP, "jr ra\n"); 
     fprintf(FP, ".data\n");
     fprintf(FP, "_frameSize_%s:     .word    %d\n", name, frame_offset);
-    fprintf(FP, "_paramSize_%s:     .word    %d\n", name, param_on_stack_offset - 8);
+    fprintf(FP, "_paramSize_%s:     .word    %d\n", name, param_on_stack_offset);
 }
 
 void gencode_fread(AST_NODE* idNode){
@@ -1260,9 +1353,13 @@ void gencode_fread(AST_NODE* idNode){
             fprintf(FP, "fsw     ft0,%d(sp)\n",symbol->offset);
         }
     } else {
-        int reg_array = get_array_reference(idNode, symbol);
-        fprintf(FP, "fsw     ft0,0(%s)\n", regmap[reg_array]);
-        free_register(reg_array);
+        get_array_reference(idNode, symbol);
+        fprintf(FP, "fsw     ft0,0(%s)\n", regmap[idNode->reg_place]);
+        free_register(idNode->reg_place);
+        if (idNode->is_sign_place_inuse) {
+            free_register(idNode->is_sign_place_inuse);
+            idNode->is_sign_place_inuse = false;
+        }
     }
 
 }
@@ -1286,13 +1383,17 @@ void gencode_read(AST_NODE* idNode){
             fprintf(FP, "sw     t0,%d(sp)\n",symbol->offset);
         }
     } else {
-        int reg_array = get_array_reference(idNode, symbol);
-        fprintf(FP, "sw     t0,0(%s)\n", regmap[reg_array]);
-        free_register(reg_array);
+        get_array_reference(idNode, symbol);
+        fprintf(FP, "sw     t0,0(%s)\n", regmap[idNode->reg_place]);
+        free_register(idNode->reg_place);
+        if (idNode->is_sign_place_inuse) {
+            free_register(idNode->sign_place);
+            idNode->is_sign_place_inuse = false;
+        }
     }
 }
 
-int get_array_reference(AST_NODE *array, SymbolTableEntry *symbol) {
+void get_array_reference(AST_NODE *array, SymbolTableEntry *symbol) {
     int reg_place;
     bool is_pointer = false;
     DATA_TYPE element_type = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType;
@@ -1301,6 +1402,10 @@ int get_array_reference(AST_NODE *array, SymbolTableEntry *symbol) {
     const int total_dimension = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.dimension;
     AST_NODE *expr = array->child;
     int reference_offset = get_register(true, false);
+    int sign_place;
+    sign_place = get_register(true, false);
+    array->sign_place = sign_place;
+    array->is_sign_place_inuse = true;
 
     gencode_RelopExpr(expr);
     fprintf(FP, "mv     %s,%s\n", regmap[reference_offset], regmap[expr->reg_place]);
@@ -1331,15 +1436,21 @@ int get_array_reference(AST_NODE *array, SymbolTableEntry *symbol) {
         fprintf(FP, "mul    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
         free_register(reg_place);
     }
-
+    
     fprintf(FP, "slli   %1$s,%1$s,2\n", regmap[reference_offset]);
     if (symbol->global == true) {    // global global
         fprintf(FP, "la      s11,_g_%d\n", symbol->offset);
         fprintf(FP, "add    %1$s,%1$s,s11\n", regmap[reference_offset]);
+        if (element_type == INT_TYPE) {
+            fprintf(FP, "li     %s,0\n", regmap[sign_place]);
+        } else {
+            fprintf(FP, "li     %s,1\n", regmap[sign_place]);
+        }
     } else {                        // local local
         if (symbol->isFunctionParameter) {
             reg_place = get_register(true, false);
-            fprintf(FP, "ld    %s,%d(sp)\n", regmap[reg_place], symbol->offset);
+            fprintf(FP, "ld    %s,%d(sp)\n", regmap[sign_place], symbol->offset);
+            fprintf(FP, "ld    %s,%d(sp)\n", regmap[reg_place], symbol->offset+8);
             fprintf(FP, "add    %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
             free_register(reg_place);
         } else {
@@ -1348,9 +1459,14 @@ int get_array_reference(AST_NODE *array, SymbolTableEntry *symbol) {
             fprintf(FP, "li     %s,%d\n", regmap[reg_place], symbol->offset);
             fprintf(FP, "add   %1$s,%1$s,%2$s\n", regmap[reference_offset], regmap[reg_place]);
             free_register(reg_place);
+            if (element_type == INT_TYPE) {
+                fprintf(FP, "li     %s,0\n", regmap[sign_place]);
+            } else {
+                fprintf(FP, "li     %s,1\n", regmap[sign_place]);
+            }
         }
     }
-    return reference_offset;
+    array->reg_place = reference_offset;
 }
 
 void gencode_write(AST_NODE* functionCallNode){
@@ -1421,7 +1537,7 @@ void gencode_write(AST_NODE* functionCallNode){
             fprintf(FP, "jal     _write_float\n");
             break;
         default:
-            fprintf(stderr, "gencodewrite Error %d\n",param->dataType);
+            fprintf(stderr, "gencodewrite Error %d\n",dataType);
             exit(255);
     }
     free_register(param->reg_place);
