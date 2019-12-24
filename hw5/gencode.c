@@ -181,6 +181,7 @@ DATA_TYPE gencode_RelopExpr(AST_NODE* variable) {
 }
 
 void gencode_ExprNode(AST_NODE* exprNode){  // reuse register
+    bool is_int_operation = false;
     DATA_TYPE dataType1, dataType2;
     if (exprNode->semantic_value.exprSemanticValue.kind == BINARY_OPERATION) {
         AST_NODE *left = exprNode->child;
@@ -202,7 +203,84 @@ void gencode_ExprNode(AST_NODE* exprNode){  // reuse register
             fprintf(stderr, "ExprNode binary node whose right child is not int or float.\n");
             exit(255);
         }
-        
+
+        // these binary operands only operate on int
+        switch (exprNode->semantic_value.exprSemanticValue.op.binaryOp) {
+            case BINARY_OP_EQ:
+            case BINARY_OP_GE:
+            case BINARY_OP_LE:
+            case BINARY_OP_NE:
+            case BINARY_OP_GT:
+            case BINARY_OP_LT:
+            case BINARY_OP_AND:
+            case BINARY_OP_OR:
+                is_int_operation = true;
+                if (dataType1 == FLOAT_TYPE) {
+                    float_2_int(left);
+                }
+                if (dataType2 == FLOAT_TYPE) {
+                    float_2_int(right);
+                }
+                break;
+            default:
+                // will be handled next
+                break;
+        }
+
+        switch (exprNode->semantic_value.exprSemanticValue.op.binaryOp) {
+            case BINARY_OP_EQ:
+                fprintf(FP, "sub    %1$s,%1$s,%2$s\n", regmap[left->reg_place], regmap[right->reg_place]);
+                fprintf(FP, "seqz   %1$s,%1$s\n", regmap[left->reg_place]);
+                fprintf(FP, "andi   %1$s,%1$s,255\n", regmap[left->reg_place]);
+                break;
+            case BINARY_OP_GE:
+                fprintf(FP, "slt    %1$s,%1$s,%2$s\n", regmap[left->reg_place], regmap[right->reg_place]);
+                fprintf(FP, "xori   %1$s,%1$s,1\n", regmap[left->reg_place]);
+                fprintf(FP, "andi   %1$s,%1$s,255\n", regmap[left->reg_place]);
+                break;
+            case BINARY_OP_LE:
+                fprintf(FP, "slt    %1$s,%2$s,%1$s\n", regmap[left->reg_place], regmap[right->reg_place]);
+                fprintf(FP, "xori   %1$s,%1$s,1\n", regmap[left->reg_place]);
+                fprintf(FP, "andi   %1$s,%1$s,255\n", regmap[left->reg_place]);
+                break;
+            case BINARY_OP_NE:
+                fprintf(FP, "sub    %1$s,%1$s,%2$s\n", regmap[left->reg_place], regmap[right->reg_place]);
+                fprintf(FP, "seqz   %1$s,%1$s\n", regmap[left->reg_place]);
+                fprintf(FP, "xori   %1$s,%1$s,1\n", regmap[left->reg_place]);
+                fprintf(FP, "andi   %1$s,%1$s,255\n", regmap[left->reg_place]);
+                break;
+            case BINARY_OP_GT:
+                fprintf(FP, "slt     %1$s,%2$s,%1$s\n", regmap[left->reg_place], regmap[right->reg_place]);
+                break;
+            case BINARY_OP_LT:
+                fprintf(FP, "slt     %1$s,%1$s,%2$s\n", regmap[left->reg_place], regmap[right->reg_place]);
+                break;
+            case BINARY_OP_AND:
+                fprintf(FP, "and    %1$s,%1$s,%2$s\n", regmap[left->reg_place], regmap[right->reg_place]);
+                break;
+            case BINARY_OP_OR:
+                fprintf(FP, "or     %1$s,%1$s,%2$s\n", regmap[left->reg_place], regmap[right->reg_place]);
+                break;
+            default:
+                // will be handled next
+                break;
+        } 
+        if (is_int_operation) {
+            free_register(right->reg_place);
+            if (right->is_sign_place_inuse) {
+                free_register(right->sign_place);
+                right->is_sign_place_inuse = false;
+            }
+            if (left->is_sign_place_inuse) {
+                free_register(left->sign_place);
+                left->is_sign_place_inuse = false;
+            }
+            exprNode->dataType = INT_TYPE;
+            exprNode->reg_place = left->reg_place;
+
+            return;
+        }
+
         if (dataType1 == FLOAT_TYPE || dataType2 == FLOAT_TYPE) {        // at least one is float
             exprNode->dataType = FLOAT_TYPE;
             if (dataType1 == INT_TYPE) {
@@ -1173,7 +1251,74 @@ void gencode_AssignmentStmt(AST_NODE* assignmentNode){
 
 
 void gencode_ForStmt(AST_NODE* forNode){
+    AST_NODE *first = forNode->child;
+    AST_NODE *second = first->rightSibling;
+    AST_NODE *third = second->rightSibling;
+    AST_NODE *block = third->rightSibling;
+    AST_NODE *tmp;
+    DATA_TYPE dataType;
+
+    // only do somthing when first->nodeType != NUL_NODE
+    if (first->nodeType != NUL_NODE) {
+        for (tmp = first->child; tmp != NULL; tmp = tmp->rightSibling) {
+            if (tmp->nodeType == STMT_NODE) {
+                gencode_StmtNode(tmp);
+            } else {
+                gencode_RelopExpr(tmp);
+                free_register(tmp->reg_place);
+                if (tmp->is_sign_place_inuse) {
+                    free_register(tmp->sign_place);
+                    tmp->is_sign_place_inuse = false;
+                }
+            }
+        }
+    } 
+
+    // check for condition first
+    fprintf(FP, "_forCondition%d:\n", branch_count);
+    if (second->nodeType != NUL_NODE) {
+        for (tmp = second->child; tmp != NULL; tmp = tmp->rightSibling) {
+            dataType = gencode_RelopExpr(tmp);
+            if (dataType == FLOAT_TYPE) {
+                float_2_int(tmp);
+            }
+            fprintf(FP, "beqz   %s,_Lexit%d\n", regmap[tmp->reg_place], branch_count);
+
+            free_register(tmp->reg_place);
+            if (tmp->is_sign_place_inuse) {
+                free_register(tmp->sign_place);
+                tmp->is_sign_place_inuse = false;
+            }
+        }
+    }
+    fprintf(FP, "j  _forBody%d\n", branch_count);
+
+    // only do somthing when first->nodeType != NUL_NODE
+    fprintf(FP, "_forInc%d:\n", branch_count);
+    if (third->nodeType != NUL_NODE) {
+        for (tmp = third->child; tmp != NULL; tmp = tmp->rightSibling) {
+            if (tmp->nodeType == STMT_NODE) {
+                gencode_StmtNode(tmp);
+            } else {
+                gencode_RelopExpr(tmp);
+                free_register(tmp->reg_place);
+                if (tmp->is_sign_place_inuse) {
+                    free_register(tmp->sign_place);
+                    tmp->is_sign_place_inuse = false;
+                }
+            }
+        }
+    } 
+    fprintf(FP, "j  _forCondition%d\n", branch_count);
     
+
+    // now deal with block
+    fprintf(FP, "_forBody%d:\n", branch_count);
+    gencode_StmtNode(block);
+    fprintf(FP, "j  _forInc%d\n", branch_count);
+    fprintf(FP, "_Lexit%d:\n", branch_count);
+    ++branch_count;
+   
 }
 
 void gencode_WhileStmt(AST_NODE* whileNode){
@@ -1343,8 +1488,10 @@ void gencode_epilogue(char *name){
 }
 
 void gencode_fread(AST_NODE* idNode){
+    int reg_place;
     fprintf(FP, "call    _read_float\n");  // data in fa0
-    fprintf(FP, "fmv.s   ft0,fa0\n");
+    reg_place = get_register(false, false);
+    fprintf(FP, "fmv.s   %s,fa0\n", regmap[reg_place]);
     
     SymbolTableEntry* symbol = gencode_retrieveSymbol(idNode->semantic_value.identifierSemanticValue.identifierName,/*onlyInCurrentScope*/false);
     
@@ -1356,25 +1503,27 @@ void gencode_fread(AST_NODE* idNode){
     if (symbol->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR) { 
         if (symbol->global == true) {
             fprintf(FP, "la      s11,_g_%d\n",symbol->offset);
-            fprintf(FP, "fsw     ft0,0(s11)\n");
+            fprintf(FP, "fsw     %s,0(s11)\n", regmap[reg_place]);
         } else {
-            fprintf(FP, "fsw     ft0,%d(sp)\n",symbol->offset);
+            fprintf(FP, "fsw     %s,%d(sp)\n", regmap[reg_place], symbol->offset);
         }
     } else {
         get_array_reference(idNode, symbol);
-        fprintf(FP, "fsw     ft0,0(%s)\n", regmap[idNode->reg_place]);
+        fprintf(FP, "fsw     %s,0(%s)\n", regmap[reg_place], regmap[idNode->reg_place]);
         free_register(idNode->reg_place);
         if (idNode->is_sign_place_inuse) {
             free_register(idNode->is_sign_place_inuse);
             idNode->is_sign_place_inuse = false;
         }
     }
-
+    free_register(reg_place);
 }
 
 void gencode_read(AST_NODE* idNode){
+    int reg_place;
     fprintf(FP, "call    _read_int\n");    // data in a0
-    fprintf(FP, "mv      t0,a0\n");
+    reg_place = get_register(true, false);
+    fprintf(FP, "mv      %s,a0\n", regmap[reg_place]);
     
     SymbolTableEntry* symbol = gencode_retrieveSymbol(idNode->semantic_value.identifierSemanticValue.identifierName,/*onlyInCurrentScope*/false);
     
@@ -1386,19 +1535,20 @@ void gencode_read(AST_NODE* idNode){
     if (symbol->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR) {
         if (symbol->global == true) {
             fprintf(FP, "la      s11,_g_%d\n",symbol->offset);
-            fprintf(FP, "sw     t0,0(s11)\n");
+            fprintf(FP, "sw     %s,0(s11)\n", regmap[reg_place]);
         } else {
-            fprintf(FP, "sw     t0,%d(sp)\n",symbol->offset);
+            fprintf(FP, "sw     %s,%d(sp)\n", regmap[reg_place],symbol->offset);
         }
     } else {
         get_array_reference(idNode, symbol);
-        fprintf(FP, "sw     t0,0(%s)\n", regmap[idNode->reg_place]);
+        fprintf(FP, "sw     %s,0(%s)\n", regmap[reg_place], regmap[idNode->reg_place]);
         free_register(idNode->reg_place);
         if (idNode->is_sign_place_inuse) {
             free_register(idNode->sign_place);
             idNode->is_sign_place_inuse = false;
         }
     }
+    free_register(reg_place);
 }
 
 void get_array_reference(AST_NODE *array, SymbolTableEntry *symbol) {
@@ -1501,7 +1651,7 @@ int analyze_tree_depth(AST_NODE *node) {
     } else if (node->nodeType == CONST_VALUE_NODE) {
         return 1;
     }
-}// __jason
+}
 
 void gencode_write(AST_NODE* functionCallNode){
     AST_NODE* functionName = functionCallNode->child;
