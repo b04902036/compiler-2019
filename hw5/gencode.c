@@ -98,6 +98,7 @@ void gencode_write(AST_NODE* functionCallNode);
 
 void clear_parameter_register();
 void get_array_reference(AST_NODE *array, SymbolTableEntry *symbol);
+int analyze_tree_depth(AST_NODE *node);
 
 // I assume that no (a1+(a2+(a3+(a4+(a5+(...))))))
 // Only need in expression in function, store at those ast nodes.
@@ -184,8 +185,15 @@ void gencode_ExprNode(AST_NODE* exprNode){  // reuse register
     if (exprNode->semantic_value.exprSemanticValue.kind == BINARY_OPERATION) {
         AST_NODE *left = exprNode->child;
         AST_NODE *right = exprNode->child->rightSibling;
-        dataType1 = gencode_RelopExpr(left);
-        dataType2 = gencode_RelopExpr(right);
+        int left_depth = analyze_tree_depth(left);
+        int right_depth = analyze_tree_depth(right);
+        if (right_depth > left_depth) {
+            dataType2 = gencode_RelopExpr(right);
+            dataType1 = gencode_RelopExpr(left);
+        } else {
+            dataType1 = gencode_RelopExpr(left);
+            dataType2 = gencode_RelopExpr(right);
+        }
         if (dataType1 != INT_TYPE && dataType1 != FLOAT_TYPE) {
             fprintf(stderr, "ExprNode binary node whose left child is not int or float.\n");
             exit(255);
@@ -1331,7 +1339,7 @@ void gencode_epilogue(char *name){
     fprintf(FP, "jr ra\n"); 
     fprintf(FP, ".data\n");
     fprintf(FP, "_frameSize_%s:     .word    %d\n", name, frame_offset);
-    fprintf(FP, "_paramSize_%s:     .word    %d\n", name, param_on_stack_offset);
+    fprintf(FP, "_paramSize_%s:     .word    %d\n", name, param_on_stack_offset - 8);
 }
 
 void gencode_fread(AST_NODE* idNode){
@@ -1468,6 +1476,32 @@ void get_array_reference(AST_NODE *array, SymbolTableEntry *symbol) {
     }
     array->reg_place = reference_offset;
 }
+
+/**
+ * return the subtree depth from the given root node
+ * the preference of each type of node is 
+ * const < variable < function
+ */
+int analyze_tree_depth(AST_NODE *node) {
+    int depth_left;
+    int depth_right;
+    if (node->nodeType == EXPR_NODE) {
+        if (node->semantic_value.exprSemanticValue.kind == BINARY_OPERATION) {
+            depth_left = analyze_tree_depth(node->child) + 1;
+            depth_right = analyze_tree_depth(node->child->rightSibling) + 1;
+            return depth_left > depth_right ? depth_right : depth_right;
+        } else {
+            depth_left = analyze_tree_depth(node->child) + 1;
+            return depth_left;
+        }
+    } else if (node->nodeType == STMT_NODE) {
+        return 1000;
+    } else if (node->nodeType == IDENTIFIER_NODE) {
+        return 2;
+    } else if (node->nodeType == CONST_VALUE_NODE) {
+        return 1;
+    }
+}// __jason
 
 void gencode_write(AST_NODE* functionCallNode){
     AST_NODE* functionName = functionCallNode->child;
