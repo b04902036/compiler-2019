@@ -317,21 +317,13 @@ void gencode_ExprNode(AST_NODE* exprNode){  // reuse register
                     fprintf(FP, "fdiv.s   %s, %s, %s\n", regparent, regleft, regright);
                     break;
                 case BINARY_OP_EQ:
-                    break;
                 case BINARY_OP_GE:
-                    break;
                 case BINARY_OP_LE:
-                    break;
                 case BINARY_OP_NE:
-                    break;
                 case BINARY_OP_GT:
-                    break;
                 case BINARY_OP_LT:
-                    break;
                 case BINARY_OP_AND:
-                    break;
                 case BINARY_OP_OR:
-                    break;
                 default:
                     fprintf(stderr, "Unknown Binary Operator.\n");
                     exit(255);
@@ -366,23 +358,13 @@ void gencode_ExprNode(AST_NODE* exprNode){  // reuse register
                     fprintf(FP, "div     %s, %s, %s\n", regparent, regleft, regright);
                     break;
                 case BINARY_OP_EQ:
-                    break;
                 case BINARY_OP_GE:
-                    break;
                 case BINARY_OP_LE:
-                    break;
                 case BINARY_OP_NE:
-                    break;
                 case BINARY_OP_GT:
-                    fprintf(FP, "slt     %s, %s, %s\n", regparent, regright, regleft);
-                    break;
                 case BINARY_OP_LT:
-                    fprintf(FP, "slt     %s, %s, %s\n", regparent, regleft, regright);
-                    break;
                 case BINARY_OP_AND:
-                    break;
                 case BINARY_OP_OR:
-                    break;
                 default:
                     fprintf(stderr, "Unknown Binary Operator.\n");
                     exit(255);
@@ -407,6 +389,9 @@ void gencode_ExprNode(AST_NODE* exprNode){  // reuse register
                     fprintf(FP, "fneg.s  %s, %s\n", regchild, regchild);
                     break;
                 case UNARY_OP_LOGICAL_NEGATION: // how 2
+                    // TODO
+                    float_2_int(child);
+                    fprintf(FP, "seqz   %1$s,%1$s\n", regmap[child->reg_place]);
                     break;
                 default:
                     fprintf(stderr, "Unknown Unary Operator.\n");
@@ -422,6 +407,7 @@ void gencode_ExprNode(AST_NODE* exprNode){  // reuse register
                     fprintf(FP, "neg     %s, %s\n", regchild, regchild);
                     break;
                 case UNARY_OP_LOGICAL_NEGATION: // how 2
+                    fprintf(FP, "seqz   %1$s,%1$s\n", regmap[child->reg_place]);
                     break;
                 default:
                     fprintf(stderr, "Unknown Unary Operator.\n");
