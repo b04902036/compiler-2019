@@ -674,7 +674,7 @@ void gencode_ConstValueNode(AST_NODE* constValueNode){
             constValueNode->reg_place = reg_place;
             fprintf(FP, "li      %s,%d\n", regmap[reg_place], constValueNode->semantic_value.const1->const_u.intval);
             constValueNode->dataType = INT_TYPE;
-            return;
+            break;
         case FLOATC:
             //fprintf(stderr, "Gencode Float.\n");
             check_s11();
@@ -687,8 +687,11 @@ void gencode_ConstValueNode(AST_NODE* constValueNode){
             fprintf(FP, "la      s11, _CONSTANT_%d\n", constid++);
             fprintf(FP, "flw     %s,0(s11)\n",regmap[reg_place]);
             constValueNode->dataType = FLOAT_TYPE;
-            return;
-        default:    // cannot be string, string is used only in write, I deal with it in other place.
+            break;
+        case STRINGC:
+            constValueNode->dataType = CONST_STRING_TYPE;
+            break;
+        default:    // cannot be string, string is used only in write, I deal with it in other place. however that is wron.............
             fprintf(stderr, "Gencode Const Value Error.\n");
             exit(255);
     }
@@ -749,10 +752,15 @@ void gencode_declareIdList(AST_NODE* declarationNode, bool ignoreFirstDimensionO
                     fprintf(FP, ".align 3\n");
                     break;
                 case ARRAY_ID:      // global ARRAY Declare
-                    //symbol->attribute->attr.typeDescriptor->kind = ARRAY_TYPE_DESCRIPTOR;
-                    //symbol->attribute->attr.typeDescriptor->properties.arrayProperties.dimension = idx;
-                    //symbol->attribute->attr.typeDescriptor->properties.arrayProperties.elementType = type;
-                    
+                    {
+                        int total_size = 4;
+                        int total_dimension = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.dimension;
+                        const int const *all_dimension = symbol->attribute->attr.typeDescriptor->properties.arrayProperties.sizeInEachDimension;
+                        for (int i = 0; i < total_dimension; ++i) {
+                            total_size *= all_dimension[i];
+                        }
+                        fprintf(FP, "_g_%d: .space %d\n", global_offset++, total_size);
+                    }
                     break;
                 default:
                     fprintf(stderr, "[PARSER ERROR] no such kind of IdentifierSemanticValue\n");
@@ -1243,6 +1251,7 @@ void gencode_ForStmt(AST_NODE* forNode){
     AST_NODE *block = third->rightSibling;
     AST_NODE *tmp;
     DATA_TYPE dataType;
+    int now_branch_count = branch_count++;
 
     // only do somthing when first->nodeType != NUL_NODE
     if (first->nodeType != NUL_NODE) {
@@ -1261,14 +1270,14 @@ void gencode_ForStmt(AST_NODE* forNode){
     } 
 
     // check for condition first
-    fprintf(FP, "_forCondition%d:\n", branch_count);
+    fprintf(FP, "_forCondition%d:\n", now_branch_count);
     if (second->nodeType != NUL_NODE) {
         for (tmp = second->child; tmp != NULL; tmp = tmp->rightSibling) {
             dataType = gencode_RelopExpr(tmp);
             if (dataType == FLOAT_TYPE) {
                 float_2_int(tmp);
             }
-            fprintf(FP, "beqz   %s,_Lexit%d\n", regmap[tmp->reg_place], branch_count);
+            fprintf(FP, "beqz   %s,_forExit%d\n", regmap[tmp->reg_place], now_branch_count);
 
             free_register(tmp->reg_place);
             if (tmp->is_sign_place_inuse) {
@@ -1277,10 +1286,10 @@ void gencode_ForStmt(AST_NODE* forNode){
             }
         }
     }
-    fprintf(FP, "j  _forBody%d\n", branch_count);
+    fprintf(FP, "j  _forBody%d\n", now_branch_count);
 
     // only do somthing when first->nodeType != NUL_NODE
-    fprintf(FP, "_forInc%d:\n", branch_count);
+    fprintf(FP, "_forInc%d:\n", now_branch_count);
     if (third->nodeType != NUL_NODE) {
         for (tmp = third->child; tmp != NULL; tmp = tmp->rightSibling) {
             if (tmp->nodeType == STMT_NODE) {
@@ -1295,15 +1304,14 @@ void gencode_ForStmt(AST_NODE* forNode){
             }
         }
     } 
-    fprintf(FP, "j  _forCondition%d\n", branch_count);
+    fprintf(FP, "j  _forCondition%d\n", now_branch_count);
     
 
     // now deal with block
-    fprintf(FP, "_forBody%d:\n", branch_count);
+    fprintf(FP, "_forBody%d:\n", now_branch_count);
     gencode_StmtNode(block);
-    fprintf(FP, "j  _forInc%d\n", branch_count);
-    fprintf(FP, "_Lexit%d:\n", branch_count);
-    ++branch_count;
+    fprintf(FP, "j  _forInc%d\n", now_branch_count);
+    fprintf(FP, "_forExit%d:\n", now_branch_count);
    
 }
 
@@ -1311,11 +1319,11 @@ void gencode_WhileStmt(AST_NODE* whileNode){
     AST_NODE *test = whileNode->child;
     AST_NODE *stmt = test->rightSibling;
     
-    int local_controlid = controlid++;
+    int local_controlid = branch_count++;
     
     fprintf(FP, "_Test%d:\n", local_controlid);
     gencode_AssignOrExpr(test);
-    fprintf(FP, "beqz    %s, _Lexit%d\n", regmap[test->reg_place], local_controlid);
+    fprintf(FP, "beqz    %s, _whileExit%d\n", regmap[test->reg_place], local_controlid);
     free_register(test->reg_place);
     if (test->is_sign_place_inuse) {
         free_register(test->sign_place);
@@ -1323,7 +1331,7 @@ void gencode_WhileStmt(AST_NODE* whileNode){
     }
     gencode_StmtNode(stmt);
     fprintf(FP, "j       _Test%d\n", local_controlid);
-    fprintf(FP, "_Lexit%d:\n", local_controlid);
+    fprintf(FP, "_whileExit%d:\n", local_controlid);
 }
 
 void gencode_IfStmt(AST_NODE* ifNode){
@@ -1331,7 +1339,7 @@ void gencode_IfStmt(AST_NODE* ifNode){
     AST_NODE *stmt1 = test->rightSibling;
     AST_NODE *stmt2 = stmt1->rightSibling;  // It will be null node but not a null pointer if no else statement.
     
-    int local_controlid = controlid++;
+    int local_controlid = branch_count++;
     
     if (stmt2) {        // if "test" then "stmt1" else "stmt2"
         gencode_AssignOrExpr(test);
@@ -1360,7 +1368,8 @@ void gencode_IfStmt(AST_NODE* ifNode){
     
 }
 void gencode_AssignOrExpr(AST_NODE* assignOrExprRelatedNode) {
-    if (assignOrExprRelatedNode->nodeType == STMT_NODE)  {	// Assign Statement if(a=b) ...
+    if (assignOrExprRelatedNode->nodeType == STMT_NODE &&
+            assignOrExprRelatedNode->semantic_value.stmtSemanticValue.kind == ASSIGN_STMT)  {	// Assign Statement if(a=b) ...
         gencode_AssignmentStmt(assignOrExprRelatedNode);
     }
     else {													// Relop Expression if(a+b) ...
@@ -1646,8 +1655,9 @@ void gencode_write(AST_NODE* functionCallNode){
     DATA_TYPE dataType;
     
            
+    dataType = gencode_RelopExpr(param);
     // Case 1 Const String
-    if (param->dataType == CONST_STRING_TYPE) {
+    if (dataType == CONST_STRING_TYPE) {
         SymbolTableEntry* symbol = gencode_retrieveSymbol(param->semantic_value.identifierSemanticValue.identifierName,/*onlyInCurrentScope*/false);
 
         if (!strcmp(param->semantic_value.const1->const_u.sc, "\"\\n\"")) {
@@ -1673,7 +1683,6 @@ void gencode_write(AST_NODE* functionCallNode){
         return;
     }
     
-    dataType = gencode_RelopExpr(param);
     /*
     if (symbol->attribute->attr.typeDescriptor->kind == ARRAY_TYPE_DESCRIPTOR) {
         int reg_place;
